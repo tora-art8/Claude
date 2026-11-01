@@ -29,6 +29,14 @@ const imgServer = http.createServer((req, res) => {
 });
 const pageServer = http.createServer((req, res) => {
   res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+  if (req.url.startsWith('/hata')) {
+    return res.end(`<!doctype html><html><body><img src="http://127.0.0.1:8702/sayfa3.jpg" style="width:700px"></body></html>`);
+  }
+  if (req.url.startsWith('/webtoon')) {
+    return res.end(`<!doctype html><html><head><title>Webtoon</title>
+      <style>body{background:#222;margin:0} img{display:block;margin:0 auto;max-width:700px;width:100%}</style></head>
+      <body><img src="http://127.0.0.1:8702/webtoon.jpg" alt="w"></body></html>`);
+  }
   res.end(`<!doctype html><html><head><title>Test Manga Okuyucu</title>
     <style>body{background:#222;margin:0;text-align:center} img{display:block;margin:10px auto;max-width:700px;width:100%}</style></head>
     <body><h3 style="color:#ddd;font-family:sans-serif">Bölüm 1</h3>
@@ -56,6 +64,19 @@ const TR = {
   },
 };
 let apiCalls = [];
+let mockMode = 'tablo'; // 'tablo': yukarıdaki sabit çeviriler, 'webtoon': kırpıntı şekline göre
+
+// JPEG başlığından genişlik/yükseklik oku (sahte API'nin yüz ↔ balon ayrımı için)
+function jpegSize(b64) {
+  const b = Buffer.from(b64, 'base64');
+  for (let i = 2; i < b.length - 9;) {
+    if (b[i] !== 0xff) { i++; continue; }
+    const m = b[i + 1];
+    if (m >= 0xc0 && m <= 0xc3) return { h: b.readUInt16BE(i + 5), w: b.readUInt16BE(i + 7) };
+    i += 2 + b.readUInt16BE(i + 2);
+  }
+  return { w: 1, h: 1 };
+}
 
 async function mockApi(route) {
   const req = route.request();
@@ -71,8 +92,19 @@ async function mockApi(route) {
     out = { kisaltmalar: items.map((it) => ({ no: it.no, turkce: KISA[it.no] || 'Tamam.' })) };
   } else {
     const ids = content.filter((c) => c.type === 'text' && /^Balon #/.test(c.text)).map((c) => +c.text.match(/#(\d+)/)[1]);
+    if (mockMode === 'webtoon') {
+      // Kırpıntının hemen ardından gelen görsel o balona aittir; kare olanlar yüzdür
+      const shapes = {};
+      content.forEach((c, i) => { if (c.type === 'text' && /^Balon #/.test(c.text)) shapes[+c.text.match(/#(\d+)/)[1]] = jpegSize(content[i + 1].source.data); });
+      out = { balonlar: ids.map((id) => {
+        const { w, h } = shapes[id];
+        const speech = w / h > 1.15;
+        return { no: id, ingilizce: speech ? 'TEXT' : '', konusma: speech, turkce: speech ? `Webtoon testi, balon ${id}.` : '' };
+      }) };
+    } else {
     const table = TR[ids.length] || {};
     out = { balonlar: ids.map((id) => table[id] ? { no: id, ingilizce: table[id][0], konusma: true, turkce: table[id][1] } : { no: id, ingilizce: '', konusma: false, turkce: '' }) };
+    }
   }
   await route.fulfill({
     status: 200,
@@ -86,6 +118,9 @@ async function mockApi(route) {
 }
 
 (async () => {
+  if (!fs.existsSync(path.join(__dirname, 'ornek', 'webtoon.jpg'))) {
+    require('child_process').execFileSync('python3', [path.join(__dirname, 'ornek-sayfa-uret.py')], { stdio: 'inherit' });
+  }
   await new Promise((r) => imgServer.listen(8702, '127.0.0.1', r));
   await new Promise((r) => pageServer.listen(8701, 'localhost', r));
   const userDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mtc-profile-'));
@@ -178,6 +213,52 @@ async function mockApi(route) {
   }
   console.log('Yenileme sonrası:', scan.images.map((i) => `${i.status} önbellek=${i.fromCache}`), 'yeni API çağrısı:', apiCalls.length - before);
   assert(apiCalls.length === before, 'önbellekten gelmeli, API çağrılmamalı');
+
+  // Webtoon: çok uzun tek görsel dilimlere bölünmeli; her balon tam bir kez işlenmeli
+  mockMode = 'webtoon';
+  const callsBefore = apiCalls.length;
+  await page.goto('http://localhost:8701/webtoon');
+  await page.waitForFunction(() => document.images[0].complete && document.images[0].naturalWidth > 0);
+  await tabMsg({ type: 'translatePage' });
+  for (let i = 0; i < 300; i++) {
+    scan = await tabMsg({ type: 'scan' });
+    if (scan.images.length && scan.images.every((im) => ['done', 'none', 'error'].includes(im.status))) break;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  const wCalls = apiCalls.slice(callsBefore).filter((c) => c.body.output_config.format.schema.properties.balonlar);
+  const sent = wCalls.map((c) => c.body.messages[0].content.filter((x) => x.type === 'text' && /^Balon #/.test(x.text)).length);
+  const total = sent.reduce((a, b) => a + b, 0);
+  console.log(`Webtoon: ${wCalls.length} dilim isteği, dilim başına aday: [${sent}], toplam ${total}; sonuç: ${scan.images[0].status} ${scan.images[0].count} balon ${scan.images[0].error}`);
+  // sayfa1'de 11, sayfa2'de 3 aday var; 5 tekrar → 70 aday, bunların 8×5=40'ı konuşma
+  assert(total === 70, 'her aday balon tam bir kez gönderilmeli (eksik/mükerrer yok)');
+  assert(scan.images[0].status === 'done' && scan.images[0].count === 40, '40 konuşma balonu çevrilmeli');
+  const ctxBlock = wCalls[1].body.messages[0].content[0].text;
+  assert(/önceki sayfalarında/.test(ctxBlock), 'sonraki isteklerde önceki çeviriler bağlam olarak gitmeli');
+  const wimg = await page.evaluate(async () => {
+    const b = await (await fetch(document.images[0].src)).blob();
+    const buf = new Uint8Array(await b.arrayBuffer());
+    let s = ''; for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+    return btoa(s);
+  });
+  fs.writeFileSync(path.join(OUT, 'cevrilmis-webtoon.jpg'), Buffer.from(wimg, 'base64'));
+  console.log('Webtoon dilimleme ve bağlam aktarımı çalışıyor.');
+
+  // Hata yolu: API anahtarı yokken anlaşılır Türkçe hata gösterilmeli
+  await sw.evaluate(() => chrome.storage.local.set({ settings: { apiKey: '' } }));
+  const callsBeforeErr = apiCalls.length;
+  await page.goto('http://localhost:8701/hata');
+  await page.waitForFunction(() => document.images[0].complete && document.images[0].naturalWidth > 0);
+  await tabMsg({ type: 'translatePage' });
+  for (let i = 0; i < 50; i++) {
+    scan = await tabMsg({ type: 'scan' });
+    if (scan.images.length && scan.images.every((im) => ['done', 'none', 'error'].includes(im.status))) break;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  console.log('Anahtarsız deneme:', scan.images.map((i) => `${i.status}: ${i.error}`));
+  assert(scan.images[0].status === 'error' && /API anahtarı/.test(scan.images[0].error), 'anahtar yok hatası gösterilmeli');
+  assert(apiCalls.length === callsBeforeErr, 'anahtarsız API çağrısı yapılmamalı');
+  assert((await page.evaluate(() => document.images[0].src)).endsWith('sayfa3.jpg'), 'hata durumunda görsel değişmemeli');
+  await page.screenshot({ path: path.join(OUT, 'ekran-hata.png') });
 
   // Popup ve ayarlar ekran görüntüsü
   const opt = await ctx.newPage();

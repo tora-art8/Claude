@@ -22,8 +22,9 @@
   function geometry(b, k) {
     // Bir yatay şerit [yTop, yBot] (tam çözünürlük) için kullanılabilir genişlik
     return function band(yTop, yBot) {
-      const r0 = Math.floor(yTop / k) - b.oy;
-      const r1 = Math.ceil(yBot / k) - b.oy;
+      const off = b.offY || 0; // uzun görsellerde dilimin görüntüdeki dikey başlangıcı
+      const r0 = Math.floor((yTop - off) / k) - b.oy;
+      const r1 = Math.ceil((yBot - off) / k) - b.oy;
       if (r0 < 0 || r1 >= b.bh) return null;
       let L = -Infinity, R = Infinity;
       for (let r = r0; r <= r1; r++) {
@@ -87,7 +88,7 @@
     const ws = words(text);
     if (!ws.length) return { fits: true, fontSize: minF, lines: [] };
     const band = geometry(b, k);
-    const centerY = (b.oy + b.maskCy) * k;
+    const centerY = (b.offY || 0) + (b.oy + b.maskCy) * k;
     const maxLines = 12;
     const attempt = (f, allowBreak) => {
       ctx.font = fontStr(f);
@@ -109,7 +110,7 @@
   MTC.forceFit = function forceFit(ctx, text, b, k, minF) {
     const ws = words(text);
     const band = geometry(b, k);
-    const centerY = (b.oy + b.maskCy) * k;
+    const centerY = (b.offY || 0) + (b.oy + b.maskCy) * k;
     for (let f = minF; f >= Math.max(6, minF * 0.6); f -= Math.max(0.5, f * 0.05)) {
       ctx.font = fontStr(f);
       for (let n = 1; n <= 16; n++) {
@@ -145,7 +146,7 @@
     const avg = ctx.measureText(sample).width / sample.length;
     const lh = f * LINE_H;
     const pad = Math.max(2, f * 0.35);
-    const centerY = (b.oy + b.maskCy) * k;
+    const centerY = (b.offY || 0) + (b.oy + b.maskCy) * k;
     let best = 0;
     for (let n = 1; n <= 12; n++) {
       const top = centerY - (n * lh) / 2;
@@ -186,10 +187,10 @@
     cx.putImageData(id, 0, 0);
     ctx.save();
     ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(c, 0, 0, bw, bh, b.ox * k, b.oy * k, bw * k, bh * k);
+    ctx.drawImage(c, 0, 0, bw, bh, b.ox * k, (b.offY || 0) + b.oy * k, bw * k, bh * k);
     // Yumuşatma kenarlarda yarı saydamlık bırakabilir; yazının bulunduğu
     // bölgeyi ikinci kez boyayarak harf izlerinin tamamen kapanmasını sağla.
-    ctx.drawImage(c, 0, 0, bw, bh, b.ox * k, b.oy * k, bw * k, bh * k);
+    ctx.drawImage(c, 0, 0, bw, bh, b.ox * k, (b.offY || 0) + b.oy * k, bw * k, bh * k);
     ctx.restore();
   };
 

@@ -306,6 +306,14 @@ async function translateBubbles(m) {
   }
 
   const content = [];
+  if (m.context?.length) {
+    // Önceki sayfaların çevirileri: isim, hitap (sen/siz) ve üslup bölüm boyunca aynı kalsın
+    const lines = m.context.map((c) => `- "${c.en}" → "${c.tr}"`).join('\n');
+    content.push({
+      type: 'text',
+      text: `Aynı bölümün önceki sayfalarında yapılan çeviriler (isimleri, hitapları ve karakterlerin konuşma tarzını bunlarla tutarlı tut; bunları tekrar çevirme):\n${lines}`,
+    });
+  }
   if (m.page) {
     content.push({ type: 'text', text: 'Sayfanın tamamı (sadece bağlam için):' });
     content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: m.page } });

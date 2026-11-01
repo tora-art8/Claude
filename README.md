@@ -10,6 +10,11 @@ Chrome, Edge, Brave, Opera gibi tüm Chromium tabanlı tarayıcılarda çalış�
 
 > Görseller bu proje için çizilmiş özgün test sayfasıdır (`test/ornek-sayfa-uret.py`).
 
+Zor koşullar testi (düşük kaliteli JPEG, kirli kâğıt rengi, ince çizgi, dikenli bağırma balonu,
+gri kutu, panel sınırını aşan balon):
+
+![zor sayfa](docs/zor-sayfa.png)
+
 ---
 
 ## 1. Kurulum (5 dakika)
@@ -85,6 +90,9 @@ Bilgisayarlı görü kısmı tamamen tarayıcıda, ek kütüphane olmadan yapıl
    panel/arka plan sayılıp elenir; her yere yayılmış nokta deseni (ekran tonu) elenir.
 4. Her balon için sınır kutusu, gerçek şekil maskesi, her satırdaki sol/sağ sınır, arka plan rengi ve
    orijinal harf yüksekliği çıkarılır.
+5. **Webtoon gibi çok uzun görseller** üst üste binen dilimlere bölünür; her dilim tam çözünürlükte
+   taranır ve ayrı istekle çevrilir. Dilim sınırına denk gelen balon komşu dilimde bütün olarak işlenir,
+   hiçbir balon iki kez yazılmaz.
 
 Yazı okuma (OCR) işini Claude yapar: her balonun kırpıntısını görür. Bu, Tesseract gibi tarayıcı OCR'larına göre
 manga fontlarında çok daha isabetlidir ve **efekt seslerini/yanlış adayları** ayıklar: Claude "bu konuşma değil"
@@ -99,6 +107,8 @@ derse o alana hiç dokunulmaz.
 - İstem (prompt) şunları ister: birebir değil doğal çeviri, karakterin tonu ve sen/siz hitabı, ünlem ve
   kekelemelerin korunması, isim ve -san/-kun/senpai gibi eklerin değiştirilmemesi, sığmıyorsa anlamı koruyarak kısaltma.
 - Yanıt JSON şemasıyla (structured outputs) zorunlu biçimde gelir, bozuk yanıt riski yoktur.
+- **Bölüm boyunca tutarlılık:** önceki sayfalarda yapılan son 20 çeviri bağlam olarak gönderilir; böylece
+  bir karakterin adı, lakabı ve "sen/siz" hitabı sayfadan sayfaya değişmez.
 
 ### Aşama 4 — Sığdırma ve yazma (`lib/layout.js`)
 1. İngilizce yazı, balonun kendi arka plan rengiyle balonun şekli boyunca kapatılır (kenar çizgisi korunur).
@@ -177,7 +187,9 @@ node test/uctan-uca-test.js                      # eklentiyi Chromium'da baştan
 
 Uçtan uca test; farklı alan adından ve Referer korumalı sunucudan görsel yükler (CORS/hotlink senaryosu),
 Claude API'yi sahte yanıtla taklit eder ve şunları doğrular: görsel listeleme, balon tespiti, çeviri isteği
-başlıkları, sığmayan çevirinin kısaltılması, görselin değişmesi, orijinal↔çeviri geçişi ve önbellekten yükleme.
+başlıkları, sığmayan çevirinin kısaltılması, görselin değişmesi, orijinal↔çeviri geçişi, önbellekten yükleme,
+11.780 piksel uzunluğunda webtoon şeridinde her balonun tam bir kez işlenmesi, sayfalar arası bağlam aktarımı ve
+API anahtarı yokken anlaşılır hata gösterilmesi.
 
 ## Telif notu
 

@@ -25,6 +25,9 @@
   const queue = [];
   let running = 0;
   let lastError = '';
+  // Bölüm boyunca tutarlılık: son çevrilen satırlar modele bağlam olarak gider
+  const recentLines = [];
+  const CONTEXT_LINES = 20;
 
   // -------------------------------------------------------------------
   // Yardımcılar
@@ -161,6 +164,23 @@
     }
   }
 
+  /**
+   * Görseli dikey dilimlere böler. Normal sayfalar tek dilimdir.
+   * core0..core1: dilimin "sahip olduğu" bölge (balon merkezi burada olmalı).
+   * y0..y1: işlenen pencere (üst/alt komşu dilimlerle örtüşür, böylece kesilen balon kalmaz).
+   */
+  function makeSegments(W, H) {
+    if (H / W <= 3) return [{ y0: 0, y1: H, core0: 0, core1: H }];
+    const step = Math.round(W * 1.6);
+    const overlap = Math.round(W * 0.7);
+    const segs = [];
+    for (let c0 = 0; c0 < H; c0 += step) {
+      const c1 = Math.min(H, c0 + step);
+      segs.push({ core0: c0, core1: c1, y0: Math.max(0, c0 - overlap), y1: Math.min(H, c1 + overlap) });
+    }
+    return segs;
+  }
+
   // -------------------------------------------------------------------
   // Ana işlem: tek bir görseli çevir
   // -------------------------------------------------------------------
@@ -183,109 +203,124 @@
     const fctx = full.getContext('2d');
     fctx.drawImage(bitmap, 0, 0);
 
-    // Hız için küçültülmüş kopyada balon ara
-    ent.step = 'Balonlar aranıyor';
-    updatePanel();
-    const ps = Math.min(1, 1100 / W, Math.sqrt(4e6 / (W * H)));
-    const pw = Math.max(1, Math.round(W * ps)), ph = Math.max(1, Math.round(H * ps));
-    const proc = makeCanvas(pw, ph);
-    const pctx = proc.getContext('2d', { willReadFrequently: true });
-    pctx.drawImage(bitmap, 0, 0, pw, ph);
-    const data = pctx.getImageData(0, 0, pw, ph);
-    const k = W / pw;
-    const hash = hashImage(data);
-    const bubbles = MTC.detectBubbles(data);
-    bitmap.close?.();
-
-    if (!bubbles.length) {
-      ent.status = 'none';
-      ent.step = '';
-      return;
-    }
-
-    // Yazı boyutu sınırları: ekranda en az minFontPx CSS piksel görünsün
+    // Webtoon gibi çok uzun görseller üst üste binen dilimlere bölünür; böylece
+    // görüntü fazla küçültülmez ve her dilim ayrı bir çeviri isteğiyle gönderilir.
+    const segments = makeSegments(W, H);
     const dispW = img.getBoundingClientRect().width || img.width || W;
     const screenScale = W / dispW; // 1 CSS piksel = kaç görüntü pikseli
-    const minF = Math.max(7, settings.minFontPx * screenScale);
-    for (const b of bubbles) {
-      const orig = b.medianLetterH ? (b.medianLetterH * k) / 0.72 : minF * 1.6;
-      b.minF = minF;
-      b.maxF = Math.max(minF, Math.min(orig * 1.05, minF * 2.6));
-      const comfy = Math.max(minF * 1.05, Math.min(orig * 0.95, b.maxF));
-      b.maxChars = MTC.estimateCapacity(fctx, b, k, comfy);
-    }
-
-    // Yapay zekâya gidecek görseller: balon kırpıntıları + (uygunsa) sayfanın tamamı
-    const tall = H / W > 3.2; // webtoon gibi çok uzun şeritlerde tam sayfa küçülünce okunmaz
-    const crops = {};
-    for (const b of bubbles) {
-      const m = Math.max(b.w, b.h) * (tall ? 0.45 : 0.12);
-      const x0 = Math.max(0, Math.floor((b.x - m) * k)), y0 = Math.max(0, Math.floor((b.y - m) * k));
-      const x1 = Math.min(W, Math.ceil((b.x + b.w + m) * k)), y1 = Math.min(H, Math.ceil((b.y + b.h + m) * k));
-      const cw = x1 - x0, ch = y1 - y0;
-      const s = Math.min(1, 640 / Math.max(cw, ch));
-      const c = makeCanvas(Math.max(1, Math.round(cw * s)), Math.max(1, Math.round(ch * s)));
-      c.getContext('2d').drawImage(full, x0, y0, cw, ch, 0, 0, c.width, c.height);
-      crops[b.id] = canvasToB64(c, 0.9);
-    }
-    let page = null;
-    if (!tall) {
-      const s = Math.min(1, 1400 / Math.max(W, H));
-      const c = makeCanvas(Math.round(W * s), Math.round(H * s));
-      c.getContext('2d').drawImage(full, 0, 0, c.width, c.height);
-      page = canvasToB64(c, 0.8);
-    }
-
-    ent.step = `${bubbles.length} balon çevriliyor`;
-    updatePanel();
-    const { results, fromCache } = await bg('translate', {
-      hash,
-      page,
-      crops,
-      bubbles: bubbles.map((b) => ({ id: b.id, maxChars: b.maxChars, box: [b.x, b.y, b.w, b.h] })),
-    });
-    ent.fromCache = fromCache;
-
-    const byId = new Map(results.map((r) => [r.id, r]));
+    const minF = Math.max(7, settings.minFontPx * screenScale); // ekranda en az minFontPx görünsün
     const caseFix = (t) => (settings.uppercase ? t.toLocaleUpperCase('tr-TR') : t);
-
-    // 1. tur: yazı boyutunu küçülterek sığdırmayı dene
     const todo = [];
-    for (const b of bubbles) {
-      const r = byId.get(b.id);
-      if (!r || !r.speech || !r.tr) continue;
-      b.result = r;
-      b.layout = MTC.fitText(fctx, caseFix(r.tr), b, k, b.minF, b.maxF);
-      todo.push(b);
-    }
+    let anyCache = true;
 
-    // 2. tur: hâlâ sığmayanları yapay zekâya daha sıkı sınırla kısalttır
-    const overflow = todo.filter((b) => !b.layout.fits);
-    if (overflow.length) {
-      ent.step = `${overflow.length} çeviri kısaltılıyor`;
+    for (let si = 0; si < segments.length; si++) {
+      const seg = segments[si];
+      const part = segments.length > 1 ? ` (bölüm ${si + 1}/${segments.length})` : '';
+      ent.step = 'Balonlar aranıyor' + part;
       updatePanel();
-      try {
-        const short = await bg('shorten', {
-          hash,
-          items: overflow.map((b) => ({
-            id: b.id,
-            tr: b.result.tr,
-            en: b.result.en,
-            maxChars: Math.max(3, Math.floor(MTC.estimateCapacity(fctx, b, k, b.minF) * 0.9)),
-          })),
-        });
-        for (const b of overflow) {
-          if (short[b.id]) {
-            b.result.tr = short[b.id];
-            b.layout = MTC.fitText(fctx, caseFix(short[b.id]), b, k, b.minF, b.maxF);
-          }
-        }
-      } catch (e) {
-        console.warn('[MangaÇeviri] Kısaltma başarısız', e);
+
+      // Hız için küçültülmüş kopyada balon ara
+      const segH = seg.y1 - seg.y0;
+      const ps = Math.min(1, 1100 / W, Math.sqrt(4e6 / (W * segH)));
+      const pw = Math.max(1, Math.round(W * ps)), ph = Math.max(1, Math.round(segH * ps));
+      const proc = makeCanvas(pw, ph);
+      const pctx = proc.getContext('2d', { willReadFrequently: true });
+      pctx.drawImage(full, 0, seg.y0, W, segH, 0, 0, pw, ph);
+      const data = pctx.getImageData(0, 0, pw, ph);
+      const k = W / pw;
+      const hash = hashImage(data);
+      const bubbles = MTC.detectBubbles(data).filter((b) => {
+        // Dilim kesim çizgisine değen balonlar komşu dilimde bütün olarak işlenir
+        if (seg.y0 > 0 && b.y <= 1) return false;
+        if (seg.y1 < H && b.y + b.h >= ph - 2) return false;
+        const cy = seg.y0 + (b.y + b.h / 2) * k;
+        return cy >= seg.core0 && cy < seg.core1;
+      });
+      if (!bubbles.length) continue;
+
+      for (const b of bubbles) {
+        b.k = k;
+        b.offY = seg.y0;
+        const orig = b.medianLetterH ? (b.medianLetterH * k) / 0.72 : minF * 1.6;
+        b.minF = minF;
+        b.maxF = Math.max(minF, Math.min(orig * 1.05, minF * 2.6));
+        const comfy = Math.max(minF * 1.05, Math.min(orig * 0.95, b.maxF));
+        b.maxChars = MTC.estimateCapacity(fctx, b, k, comfy);
       }
-      // 3. tur (son çare): minimumun altına in, gerekirse kelime böl
-      for (const b of todo) if (!b.layout.fits) b.layout = MTC.forceFit(fctx, caseFix(b.result.tr), b, k, b.minF);
+
+      // Yapay zekâya gidecek görseller: balon kırpıntıları + dilimin/sayfanın tamamı (bağlam için)
+      const crops = {};
+      for (const b of bubbles) {
+        const m = Math.max(b.w, b.h) * 0.12;
+        const x0 = Math.max(0, Math.floor((b.x - m) * k)), y0 = Math.max(0, Math.floor(seg.y0 + (b.y - m) * k));
+        const x1 = Math.min(W, Math.ceil((b.x + b.w + m) * k)), y1 = Math.min(H, Math.ceil(seg.y0 + (b.y + b.h + m) * k));
+        const cw = x1 - x0, ch = y1 - y0;
+        const s = Math.min(1, 640 / Math.max(cw, ch));
+        const c = makeCanvas(Math.max(1, Math.round(cw * s)), Math.max(1, Math.round(ch * s)));
+        c.getContext('2d').drawImage(full, x0, y0, cw, ch, 0, 0, c.width, c.height);
+        crops[b.id] = canvasToB64(c, 0.9);
+      }
+      const s = Math.min(1, 1400 / Math.max(W, segH));
+      const pc = makeCanvas(Math.max(1, Math.round(W * s)), Math.max(1, Math.round(segH * s)));
+      pc.getContext('2d').drawImage(full, 0, seg.y0, W, segH, 0, 0, pc.width, pc.height);
+      const page = canvasToB64(pc, 0.8);
+
+      ent.step = `${bubbles.length} balon çevriliyor` + part;
+      updatePanel();
+      const { results, fromCache } = await bg('translate', {
+        hash,
+        page,
+        crops,
+        context: recentLines.slice(-CONTEXT_LINES),
+        bubbles: bubbles.map((b) => ({ id: b.id, maxChars: b.maxChars, box: [b.x, b.y, b.w, b.h] })),
+      });
+      if (!fromCache) anyCache = false;
+
+      // 1. tur: yazı boyutunu küçülterek sığdırmayı dene
+      const byId = new Map(results.map((r) => [r.id, r]));
+      const segTodo = [];
+      for (const b of bubbles) {
+        const r = byId.get(b.id);
+        if (!r || !r.speech || !r.tr) continue;
+        b.result = r;
+        b.layout = MTC.fitText(fctx, caseFix(r.tr), b, k, b.minF, b.maxF);
+        segTodo.push(b);
+      }
+
+      // 2. tur: hâlâ sığmayanları yapay zekâya daha sıkı sınırla kısalttır
+      const overflow = segTodo.filter((b) => !b.layout.fits);
+      if (overflow.length) {
+        ent.step = `${overflow.length} çeviri kısaltılıyor` + part;
+        updatePanel();
+        try {
+          const short = await bg('shorten', {
+            hash,
+            items: overflow.map((b) => ({
+              id: b.id,
+              tr: b.result.tr,
+              en: b.result.en,
+              maxChars: Math.max(3, Math.floor(MTC.estimateCapacity(fctx, b, k, b.minF) * 0.9)),
+            })),
+          });
+          for (const b of overflow) {
+            if (short[b.id]) {
+              b.result.tr = short[b.id];
+              b.layout = MTC.fitText(fctx, caseFix(short[b.id]), b, k, b.minF, b.maxF);
+            }
+          }
+        } catch (e) {
+          console.warn('[MangaÇeviri] Kısaltma başarısız', e);
+        }
+        // 3. tur (son çare): minimumun altına in, gerekirse kelime böl
+        for (const b of segTodo) if (!b.layout.fits) b.layout = MTC.forceFit(fctx, caseFix(b.result.tr), b, k, b.minF);
+      }
+      todo.push(...segTodo);
+      // Sonraki sayfalar için tutarlılık bağlamı (isimler, hitap, üslup)
+      for (const b of segTodo) recentLines.push({ en: b.result.en, tr: b.result.tr });
+      if (recentLines.length > 60) recentLines.splice(0, recentLines.length - 60);
     }
+    bitmap.close?.();
+    ent.fromCache = anyCache;
 
     if (!todo.length) {
       ent.status = 'none';
@@ -294,7 +329,7 @@
     }
 
     // Çizim: önce İngilizceyi kapat, sonra Türkçeyi yaz
-    for (const b of todo) MTC.coverBubble(fctx, b, k);
+    for (const b of todo) MTC.coverBubble(fctx, b, b.k);
     for (const b of todo) MTC.drawLines(fctx, b.layout, b);
 
     const mime = /png/i.test(src) ? 'image/png' : 'image/jpeg';

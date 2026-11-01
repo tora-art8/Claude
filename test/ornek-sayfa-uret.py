@@ -102,6 +102,67 @@ def page2():
     im.convert('RGB').save(os.path.join(OUT, 'sayfa2.jpg'), quality=90)
 
 
+def jagged(d, box, n=22, depth=0.18):
+    # bağırma (dikenli) balon
+    import math
+    x0, y0, x1, y1 = box
+    cx, cy, rx, ry = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2
+    pts = []
+    for i in range(n * 2):
+        a = math.pi * i / n
+        f = 1 if i % 2 == 0 else 1 - depth
+        pts.append((cx + rx * f * math.cos(a), cy + ry * f * math.sin(a)))
+    d.polygon(pts, fill='white')
+    d.line(pts + [pts[0]], fill='black', width=3)
+
+
+def page3():
+    # Zor koşullar: kirli kâğıt, ince çizgiler, panel sınırını aşan balon, dikenli balon,
+    # yuvarlak köşeli kutu, gri tonlu balon, sonra küçültme + düşük kaliteli JPEG.
+    W, H = 1100, 1600
+    im = Image.new('RGB', (W, H), (238, 234, 226))
+    d = ImageDraw.Draw(im)
+    d.rectangle((30, 30, 1070, 760), outline='black', width=4)
+    d.rectangle((30, 790, 1070, 1570), outline='black', width=4)
+    screentone(d, (34, 400, 1066, 756), step=5, r=1.3)
+    figure(d, 300, 420, 70)
+    figure(d, 800, 1200, 70)
+    # panel sınırını aşan balon (iki paneli kesiyor)
+    bubble(d, (600, 660, 1000, 900), ['THIS BUBBLE CROSSES', 'THE PANEL BORDER.'], fs=26)
+    # ince çizgili balon
+    d.ellipse((80, 70, 520, 300), fill='white', outline='black', width=2)
+    f = font(25)
+    for i, t in enumerate(['THIN OUTLINES ARE', 'COMMON IN SCANS,', 'RIGHT?']):
+        d.text((300, 140 + i * 30), t, fill='black', font=f, anchor='mm')
+    # dikenli bağırma balonu
+    jagged(d, (600, 80, 1040, 380))
+    for i, t in enumerate(['GET OUT', 'OF HERE!!']):
+        d.text((820, 205 + i * 46), t, fill='black', font=font(40), anchor='mm')
+    # yuvarlak köşeli kutu, gri tonlu iç
+    d.rounded_rectangle((60, 850, 520, 990), radius=30, fill=(232, 232, 232), outline='black', width=3)
+    for i, t in enumerate(['MEANWHILE, IN THE', 'CITY OF NEO HARBOR...']):
+        d.text((290, 895 + i * 30), t, fill='black', font=font(24), anchor='mm')
+    # küçük italik benzeri fısıltı balonu (küçük yazı)
+    bubble(d, (120, 1300, 420, 1420), ['(I hope nobody', 'heard that...)'], fs=19)
+    im = im.resize((int(W * 0.72), int(H * 0.72)), Image.LANCZOS)
+    im.save(os.path.join(OUT, 'sayfa3.jpg'), quality=55)
+
+
+
+def webtoon(repeat=5):
+    # Webtoon tarzı çok uzun tek görsel: sayfa1 ve sayfa2 art arda, 800 piksel genişlikte
+    a = Image.open(os.path.join(OUT, 'sayfa1.png')).convert('RGB').resize((800, 1200), Image.LANCZOS)
+    b = Image.open(os.path.join(OUT, 'sayfa2.jpg')).convert('RGB').resize((800, 1156), Image.LANCZOS)
+    strip = Image.new('RGB', (800, (1200 + 1156) * repeat), 'white')
+    y = 0
+    for _ in range(repeat):
+        strip.paste(a, (0, y)); y += 1200
+        strip.paste(b, (0, y)); y += 1156
+    strip.save(os.path.join(OUT, 'webtoon.jpg'), quality=80)
+
+
 page1()
 page2()
+page3()
+webtoon()
 print('Örnek sayfalar üretildi:', OUT)
