@@ -9,7 +9,7 @@ ve çeviriyi **balona sığacak şekilde** orijinal yazının üstüne yerleşti
 |---|---|---|
 | Ücret / hesap | Yok — API anahtarı gerekmez | Ücretli API anahtarı |
 | Nerede çalışır | Tamamen bilgisayarda (yazı okuma: Tesseract, çeviri: Chrome'un yerleşik çevirmeni) | Anthropic sunucusu |
-| Hız | Sayfa başı ≈ 1 saniye | Sayfa başı ≈ 15-40 saniye (tahmin) |
+| Hız | Sayfa başı ≈ 1 saniye | Hızlı modda sayfa başı ≈ 5-12 sn, 4 sayfa aynı anda (tahmin) |
 | Çeviri kalitesi | Makine çevirisi: anlaşılır ama daha düz | En doğal: ton, sen/siz hitabı, ünlemler korunur, sığmayanı anlamı bozmadan kısaltır |
 | Tarayıcı | **Google Chrome** (güncel, bilgisayar) | Chrome, Edge, Brave, Opera |
 
@@ -181,11 +181,18 @@ yazı okuma motorunun ilk yüklenmesi dahil 3 sayfa ≈ 2 saniye, motor hazırke
 Chrome'un çevirmeni de bilgisayarda çalıştığı için çok hızlıdır. 20 sayfalık bir bölüm yaklaşık yarım dakikada
 çevrilir; sayfalar sırayla hazırlandığı için okumaya hemen başlanabilir.
 
-**Claude motoru (isteğe bağlı):** Bir manga sayfası ≈ 4-6 bin girdi token (görseller) + 1-2 bin çıktı token.
+**Claude motoru (isteğe bağlı):** Varsayılan olarak hız için ayarlıdır: Opus 5.5 **hızlı mod** (yaklaşık 2,5 kat
+hızlı çıktı, 2 kat ücret), **düşük titizlik** (model az düşünür), aynı anda **4 sayfa**. Hızlı modun ayrı hız
+sınırı dolarsa ya da hesapta açık değilse istek otomatik olarak normal hızda tekrarlanır. Tahmini süre:
+20 sayfalık bölüm ≈ 30-90 saniye, ilk sayfa ≈ 5-12 saniye; tahmini ücret sayfa başı 4-10 sent (bölüm başı ≈ 1-2 $).
+Ayarlardan hızlı mod kapatılıp titizlik artırılabilir (daha yavaş, daha ucuz/özenli).
+
+Bir manga sayfası ≈ 4-6 bin girdi token (görseller) + 1-2 bin çıktı token.
 
 | Model | Sayfa başı | 100 sayfalık cilt |
 |---|---|---|
-| Claude Opus 5.5 (varsayılan, en iyi kalite) | ~3-6 sent | ~3-6 $ |
+| Claude Opus 5.5 hızlı mod (varsayılan) | ~4-10 sent | ~4-10 $ |
+| Claude Opus 5.5 normal | ~2-5 sent | ~2-5 $ |
 | Claude Sonnet 5.5 (dengeli) | ~1,5-3 sent | ~1,5-3 $ |
 | Claude Haiku 5.5 (çok ucuz) | <0,1 sent | <0,1 $ |
 

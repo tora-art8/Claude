@@ -17,7 +17,12 @@
 
   const MTC = globalThis.MTC;
   const DEFAULTS = { minFontPx: 13, uppercase: false, engine: 'ucretsiz' };
-  const MAX_PARALLEL = 2;
+  // Aynı anda işlenen sayfa sayısı: Claude motorunda 4 (bekleme süresi çoğunlukla sunucuda),
+  // ücretsiz motorda 2 (iş bilgisayarın işlemcisinde)
+  let maxParallel = 2;
+  const updateParallel = (st) => { maxParallel = st?.engine === 'claude' ? 4 : 2; };
+  chrome.storage.local.get('settings').then(({ settings }) => updateParallel(settings));
+  chrome.storage.onChanged.addListener((ch) => { if (ch.settings) updateParallel(ch.settings.newValue); });
 
   const entries = new Map(); // id -> kayıt
   let nextId = 1;
@@ -266,7 +271,7 @@
         crops[b.id] = canvasToB64(c, 0.9);
       }
       if (!free) {
-        const s = Math.min(1, 1400 / Math.max(W, segH));
+        const s = Math.min(1, 1100 / Math.max(W, segH)); // bağlam için yeterli, daha az token = daha hızlı
         const pc = makeCanvas(Math.max(1, Math.round(W * s)), Math.max(1, Math.round(segH * s)));
         pc.getContext('2d').drawImage(full, 0, seg.y0, W, segH, 0, 0, pc.width, pc.height);
         page = canvasToB64(pc, 0.8);
@@ -606,7 +611,7 @@
   }
 
   function pump() {
-    while (running < MAX_PARALLEL && queue.length) {
+    while (running < maxParallel && queue.length) {
       const ent = queue.shift();
       running++;
       processEntry(ent)

@@ -1,10 +1,10 @@
 // options.js — Ayarlar sayfası
 const $ = (id) => document.getElementById(id);
-const DEFAULTS = { engine: 'ucretsiz', apiKey: '', model: 'claude-opus-5-5', minFontPx: 13, uppercase: false, effort: 'medium' };
+const DEFAULTS = { engine: 'ucretsiz', apiKey: '', model: 'claude-opus-5-5', minFontPx: 13, uppercase: false, effort: 'low', fastMode: true };
 
 // Yaklaşık maliyet bilgisi (1 manga sayfası ≈ 4-6 bin girdi + 1-2 bin çıktı token)
 const FIYAT = {
-  'claude-opus-5-5': 'Girdi 4 $ / çıktı 20 $ (milyon token başına) — sayfa başı yaklaşık 3-6 sent.',
+  'claude-opus-5-5': 'Normal: girdi 4 $ / çıktı 20 $, hızlı mod: 8 $ / 40 $ (milyon token başına) — sayfa başı yaklaşık 2-5 sent, hızlı modda 4-10 sent.',
   'claude-sonnet-5-5': 'Girdi 2 $ / çıktı 10 $ (milyon token başına) — sayfa başı yaklaşık 1,5-3 sent.',
   'claude-haiku-5-5': 'Girdi 0,10 $ / çıktı 0,50 $ (milyon token başına) — sayfa başı 0,1 sentten az.',
 };
@@ -26,6 +26,7 @@ async function load() {
   $('effort').value = s.effort;
   $('minFontPx').value = s.minFontPx;
   $('uppercase').checked = s.uppercase;
+  $('fastMode').checked = s.fastMode;
   showEngine();
   showPrice();
   refreshCache();
@@ -33,6 +34,7 @@ async function load() {
 
 function showPrice() {
   $('fiyat').textContent = FIYAT[$('model').value] || '';
+  $('fastMode').disabled = $('model').value !== 'claude-opus-5-5';
 }
 
 async function refreshCache() {
@@ -100,6 +102,7 @@ $('kaydet').onclick = async () => {
     effort: $('effort').value,
     minFontPx: minFont,
     uppercase: $('uppercase').checked,
+    fastMode: $('fastMode').checked,
   };
   await chrome.storage.local.set({ settings });
   $('kaydedildi').hidden = false;

@@ -21,8 +21,12 @@ const DEFAULT_SETTINGS = {
   model: 'claude-opus-5-5',
   minFontPx: 13,      // ekranda okunabilir en küçük yazı boyutu (CSS piksel)
   uppercase: false,   // çeviriyi BÜYÜK HARFLE yaz
-  effort: 'medium',
+  effort: 'low',      // düşük = model az düşünür, çok daha hızlı yanıt verir
+  fastMode: true,     // Opus 5.5 hızlı mod: ~2,5 kat hızlı çıktı, 2 kat ücret
 };
+
+// Hızlı mod bu hesapta açık değilse (araştırma önizlemesi) bir kez anlayıp normal hıza geçeriz
+let fastModeUnavailable = false;
 
 async function getSettings() {
   const { settings } = await chrome.storage.local.get('settings');
@@ -243,23 +247,32 @@ async function callClaude(settings, { system, content, schema, effort, maxTokens
     messages: [{ role: 'user', content }],
     output_config: { effort: effort || settings.effort || 'medium', format: { type: 'json_schema', schema } },
   };
-  const headers = {
-    'content-type': 'application/json',
-    'x-api-key': settings.apiKey,
-    'anthropic-version': API_VERSION,
-    'anthropic-dangerous-direct-browser-access': 'true',
-  };
+  const betas = [];
   // Güvenlik sınıflandırıcısı isteği reddederse sunucu tarafında başka modelle yeniden dene
   if (/^claude-(opus-5-5|sonnet-5-5)$/.test(settings.model)) {
     body.fallbacks = 'default';
-    headers['anthropic-beta'] = 'server-side-fallback-2026-07-01';
+    betas.push('server-side-fallback-2026-07-01');
   }
+  // Hızlı mod (sadece Opus 5.5): aynı model, çok daha hızlı yanıt
+  let fast = settings.fastMode && settings.model === 'claude-opus-5-5' && !fastModeUnavailable;
+  const buildHeaders = () => {
+    const h = {
+      'content-type': 'application/json',
+      'x-api-key': settings.apiKey,
+      'anthropic-version': API_VERSION,
+      'anthropic-dangerous-direct-browser-access': 'true',
+    };
+    const b = fast ? [...betas, 'fast-mode-2026-02-01'] : betas;
+    if (b.length) h['anthropic-beta'] = b.join(',');
+    return h;
+  };
+  const buildBody = () => JSON.stringify(fast ? { ...body, speed: 'fast' } : body);
 
   let lastErr;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < 5; attempt++) {
     let res;
     try {
-      res = await fetch(API_URL, { method: 'POST', headers, body: JSON.stringify(body) });
+      res = await fetch(API_URL, { method: 'POST', headers: buildHeaders(), body: buildBody() });
     } catch (e) {
       lastErr = apiError('Ağ hatası: API\'ye ulaşılamadı. İnternet bağlantınızı kontrol edin.', 'NETWORK');
       await sleep(1500 * 2 ** attempt);
@@ -278,6 +291,15 @@ async function callClaude(settings, { system, content, schema, effort, maxTokens
     }
     let detail = '';
     try { detail = (await res.json())?.error?.message || ''; } catch (_) {}
+    // Hızlı modun ayrı hız sınırı doldu → bu isteği beklemeden normal hızda tekrarla
+    if (fast && res.status === 429) { fast = false; continue; }
+    // Hızlı mod bu hesapta yok/desteklenmiyor → bundan sonra hep normal hız
+    if (fast && (res.status === 400 || res.status === 403)) {
+      console.warn('[MangaÇeviri] Hızlı mod kullanılamadı, normal hıza geçiliyor:', detail);
+      fastModeUnavailable = true;
+      fast = false;
+      continue;
+    }
     if (res.status === 401) throw apiError('API anahtarı geçersiz. Ayarlardan kontrol edin.', 'BAD_KEY');
     if (res.status === 403) throw apiError('Bu API anahtarının bu modele erişim izni yok. ' + detail, 'FORBIDDEN');
     if (res.status === 400) {

@@ -64,7 +64,8 @@ const TR = {
   },
 };
 let apiCalls = [];
-let mockMode = 'tablo'; // 'tablo': yukarıdaki sabit çeviriler, 'webtoon': kırpıntı şekline göre
+let mockMode = 'tablo';
+let fast429Once = true; // ilk hızlı mod isteğine "hız sınırı" döndür → normal hıza geçiş test edilir // 'tablo': yukarıdaki sabit çeviriler, 'webtoon': kırpıntı şekline göre
 
 // JPEG başlığından genişlik/yükseklik oku (sahte API'nin yüz ↔ balon ayrımı için)
 function jpegSize(b64) {
@@ -81,7 +82,12 @@ function jpegSize(b64) {
 async function mockApi(route) {
   const req = route.request();
   const body = JSON.parse(req.postData() || '{}');
-  apiCalls.push({ url: req.url(), body, headers: req.headers() });
+  if (body.speed === 'fast' && fast429Once) {
+    fast429Once = false;
+    apiCalls.push({ url: req.url(), body, headers: req.headers(), status: 429 });
+    return route.fulfill({ status: 429, contentType: 'application/json', body: JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: 'fast mode rate limit' } }) });
+  }
+  apiCalls.push({ url: req.url(), body, headers: req.headers(), status: 200 });
   const content = body.messages[0].content;
   let out;
   if (body.output_config.format.schema.properties.kisaltmalar) {
@@ -167,6 +173,11 @@ async function mockApi(route) {
   }
   console.log(`Çeviri bitti (${Date.now() - t0} ms):`, scan.images.map((i) => `${i.status} ${i.count} balon ${i.error}`));
   assert(scan.images.every((i) => i.status === 'done'), 'iki sayfa da çevrilmeli');
+  const fastCalls = apiCalls.filter((c) => c.body.speed === 'fast');
+  console.log('Hızlı mod:', apiCalls.map((c) => `${c.status} ${c.body.speed || 'normal'}`).join(', '));
+  assert(fastCalls.length >= 2 && fastCalls.every((c) => /fast-mode-2026-02-01/.test(c.headers['anthropic-beta'])), 'hızlı mod isteklerde açık olmalı');
+  assert(apiCalls[0].status === 429 && !apiCalls[1].body.speed, 'hızlı mod sınırı dolunca aynı istek normal hızda tekrarlanmalı');
+  apiCalls = apiCalls.filter((c) => c.status === 200);
   const translateCalls = apiCalls.filter((c) => c.body.output_config.format.schema.properties.balonlar);
   const shortenCalls = apiCalls.filter((c) => c.body.output_config.format.schema.properties.kisaltmalar);
   console.log(`API çağrıları: ${translateCalls.length} çeviri, ${shortenCalls.length} kısaltma`);
@@ -175,7 +186,7 @@ async function mockApi(route) {
   const h = translateCalls[0].headers;
   assert(h['x-api-key'] === 'sk-ant-test' && h['anthropic-version'] && h['anthropic-dangerous-direct-browser-access'] === 'true', 'API başlıkları');
   assert(translateCalls[0].body.fallbacks === 'default', 'fallbacks parametresi');
-  console.log('Örnek istem (balon 9):', translateCalls[0].body.messages[0].content.find((c) => c.type === 'text' && c.text.startsWith('Balon #9')).text);
+  console.log('Örnek istem (balon 9):', translateCalls.flatMap((c) => c.body.messages[0].content).find((c) => c.type === 'text' && c.text.startsWith('Balon #9')).text);
   const extFetch = imageRequests.filter((r) => r.referer === 'http://localhost:8701/');
   console.log('Görsel sunucusuna gelen istekler (Referer):', imageRequests.map((r) => `${r.url} ← ${r.referer || '(yok)'}`));
 
