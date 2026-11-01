@@ -2,7 +2,6 @@
 const $ = (id) => document.getElementById(id);
 let tabId = null;
 let timer = null;
-let engine = 'ucretsiz';
 
 const DURUM = {
   idle: 'bekliyor',
@@ -18,7 +17,6 @@ function openOptions(e) {
   chrome.runtime.openOptionsPage();
 }
 $('ayarlar').onclick = openOptions;
-$('ayarlar2').onclick = openOptions;
 
 async function send(msg) {
   return chrome.tabs.sendMessage(tabId, msg, { frameId: 0 });
@@ -75,10 +73,7 @@ async function refresh() {
 }
 
 async function init() {
-  const { settings } = await chrome.storage.local.get('settings');
-  engine = settings?.engine || 'ucretsiz';
-  $('uyari').hidden = engine !== 'claude' || !!settings?.apiKey;
-  // Ücretsiz motoru önceden ısıt (OCR modeli yüklensin, ilk sayfa hızlı gelsin)
+  // Motoru önceden ısıt (OCR modeli yüklensin, ilk sayfa hızlı gelsin)
   chrome.runtime.sendMessage({ type: 'warmup' }).catch(() => {});
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -96,7 +91,7 @@ async function init() {
 }
 
 $('cevir').onclick = async () => {
-  if (engine !== 'claude') await prepareTranslator();
+  await prepareTranslator();
   await send({ type: 'translatePage' });
   refresh();
 };

@@ -57,11 +57,7 @@ body.popup { width: 340px; }
 body.options { max-width: 680px; margin: 0 auto; padding: 0 16px 40px; }
 .options header { padding: 20px 0 14px; }
 .options section { padding: 6px 0 12px; border-bottom: 1px solid var(--line); }
-.options #apiKey { flex: 1; min-width: 220px; }
 .options label { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
 .options label.check { flex-direction: row; }
 .options .save { display: flex; gap: 12px; align-items: center; padding: 16px 0; }
 code { background: var(--card); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
-.options label.radio { flex-direction: row; align-items: flex-start; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
-.options label.radio input { margin-top: 4px; }
-.options label.radio:has(input:checked) { border-color: var(--accent); background: var(--card); }

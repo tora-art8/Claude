@@ -4,10 +4,10 @@
 // Akış (her görsel için):
 //   1) Görseli arka plan servisinden indir (CORS sorunu olmasın diye)
 //   2) Tuvale (canvas) çiz, küçültülmüş kopyada balonları bul (detector.js)
-//   3) Her balon için karakter sınırı hesapla (layout.js)
-//   4) Balon kırpıntılarını arka plana gönder → Claude çevirsin
-//   5) İngilizce yazıyı kapat, Türkçeyi sığdırıp yaz
-//   6) <img> etiketinin kaynağını çevrilmiş görselle değiştir
+//   3) Yazı bölgelerini kırpıp gizli motor sayfasına gönder:
+//      orada OCR ile okunur ve Chrome'un çevirmeniyle Türkçeye çevrilir
+//   4) İngilizce yazıyı kapat, Türkçeyi balona sığdırıp yaz (layout.js)
+//   5) <img> etiketinin kaynağını çevrilmiş görselle değiştir
 //      (orijinal saklanır; tek tıkla geri dönülebilir)
 // =====================================================================
 (() => {
@@ -16,13 +16,9 @@
   globalThis.__mtc = { alive: () => { try { return !!chrome.runtime?.id; } catch (_) { return false; } } };
 
   const MTC = globalThis.MTC;
-  const DEFAULTS = { minFontPx: 13, uppercase: false, engine: 'ucretsiz' };
-  // Aynı anda işlenen sayfa sayısı: Claude motorunda 4 (bekleme süresi çoğunlukla sunucuda),
-  // ücretsiz motorda 2 (iş bilgisayarın işlemcisinde)
-  let maxParallel = 2;
-  const updateParallel = (st) => { maxParallel = st?.engine === 'claude' ? 4 : 2; };
-  chrome.storage.local.get('settings').then(({ settings }) => updateParallel(settings));
-  chrome.storage.onChanged.addListener((ch) => { if (ch.settings) updateParallel(ch.settings.newValue); });
+  const DEFAULTS = { minFontPx: 13, uppercase: false };
+  // Aynı anda işlenen sayfa sayısı (iş bilgisayarın işlemcisinde yapılıyor)
+  const maxParallel = 2;
 
   const entries = new Map(); // id -> kayıt
   let nextId = 1;
@@ -30,9 +26,6 @@
   const queue = [];
   let running = 0;
   let lastError = '';
-  // Bölüm boyunca tutarlılık: son çevrilen satırlar modele bağlam olarak gider
-  const recentLines = [];
-  const CONTEXT_LINES = 20;
 
   // -------------------------------------------------------------------
   // Yardımcılar
@@ -110,7 +103,6 @@
     return new Blob([bytes], { type: mime });
   }
 
-  const canvasToB64 = (c, q = 0.88) => c.toDataURL('image/jpeg', q).split(',')[1];
 
   function makeCanvas(w, h) {
     const c = document.createElement('canvas');
@@ -249,44 +241,19 @@
         const orig = b.medianLetterH ? (b.medianLetterH * k) / 0.72 : minF * 1.6;
         b.minF = minF;
         b.maxF = Math.max(minF, Math.min(orig * 1.05, minF * 2.6));
-        const comfy = Math.max(minF * 1.05, Math.min(orig * 0.95, b.maxF));
-        b.maxChars = MTC.estimateCapacity(fctx, b, k, comfy);
       }
 
-      const free = settings.engine !== 'claude';
-      // Ücretsiz motor: sadece yazının temizlenmiş kırpıntısı OCR'a gider
+      // Yazının temizlenmiş kırpıntısı OCR'a gider (bilgisayarda okunur ve çevrilir)
       const ocr = {};
-      if (free) for (const b of bubbles) ocr[b.id] = makeOcrCrop(full, b, k, seg.y0);
-      // Claude motoru: balon kırpıntıları + dilimin/sayfanın tamamı (bağlam için)
-      const crops = {};
-      let page = null;
-      if (!free) for (const b of bubbles) {
-        const m = Math.max(b.w, b.h) * 0.12;
-        const x0 = Math.max(0, Math.floor((b.x - m) * k)), y0 = Math.max(0, Math.floor(seg.y0 + (b.y - m) * k));
-        const x1 = Math.min(W, Math.ceil((b.x + b.w + m) * k)), y1 = Math.min(H, Math.ceil(seg.y0 + (b.y + b.h + m) * k));
-        const cw = x1 - x0, ch = y1 - y0;
-        const s = Math.min(1, 640 / Math.max(cw, ch));
-        const c = makeCanvas(Math.max(1, Math.round(cw * s)), Math.max(1, Math.round(ch * s)));
-        c.getContext('2d').drawImage(full, x0, y0, cw, ch, 0, 0, c.width, c.height);
-        crops[b.id] = canvasToB64(c, 0.9);
-      }
-      if (!free) {
-        const s = Math.min(1, 1100 / Math.max(W, segH)); // bağlam için yeterli, daha az token = daha hızlı
-        const pc = makeCanvas(Math.max(1, Math.round(W * s)), Math.max(1, Math.round(segH * s)));
-        pc.getContext('2d').drawImage(full, 0, seg.y0, W, segH, 0, 0, pc.width, pc.height);
-        page = canvasToB64(pc, 0.8);
-      }
+      for (const b of bubbles) ocr[b.id] = makeOcrCrop(full, b, k, seg.y0);
 
-      ent.step = (free ? `${bubbles.length} balon okunuyor` : `${bubbles.length} balon çevriliyor`) + part;
+      ent.step = `${bubbles.length} balon okunuyor` + part;
       updatePanel();
       const boxes = bubbles.map((b) => [b.x, b.y, b.w, b.h]);
       const resp = await bg('translate', {
         hash,
-        page,
-        crops,
         ocr,
-        context: free ? [] : recentLines.slice(-CONTEXT_LINES),
-        bubbles: bubbles.map((b, i) => ({ id: b.id, maxChars: b.maxChars, box: boxes[i] })),
+        bubbles: bubbles.map((b, i) => ({ id: b.id, box: boxes[i] })),
       });
       const { results, fromCache } = resp;
       if (!fromCache) anyCache = false;
@@ -312,40 +279,9 @@
         segTodo.push(b);
       }
 
-      // 2. tur: hâlâ sığmayanları yapay zekâya daha sıkı sınırla kısalttır
-      const overflow = segTodo.filter((b) => !b.layout.fits);
-      if (overflow.length && free) {
-        // Ücretsiz motorda kısaltma yapacak yapay zekâ yok: yazıyı küçült, gerekirse kelime böl
-        for (const b of overflow) b.layout = MTC.forceFit(fctx, caseFix(b.result.tr), b, k, b.minF);
-      } else if (overflow.length) {
-        ent.step = `${overflow.length} çeviri kısaltılıyor` + part;
-        updatePanel();
-        try {
-          const short = await bg('shorten', {
-            hash,
-            items: overflow.map((b) => ({
-              id: b.id,
-              tr: b.result.tr,
-              en: b.result.en,
-              maxChars: Math.max(3, Math.floor(MTC.estimateCapacity(fctx, b, k, b.minF) * 0.9)),
-            })),
-          });
-          for (const b of overflow) {
-            if (short[b.id]) {
-              b.result.tr = short[b.id];
-              b.layout = MTC.fitText(fctx, caseFix(short[b.id]), b, k, b.minF, b.maxF);
-            }
-          }
-        } catch (e) {
-          console.warn('[MangaÇeviri] Kısaltma başarısız', e);
-        }
-        // 3. tur (son çare): minimumun altına in, gerekirse kelime böl
-        for (const b of segTodo) if (!b.layout.fits) b.layout = MTC.forceFit(fctx, caseFix(b.result.tr), b, k, b.minF);
-      }
+      // 2. tur: hâlâ sığmıyorsa yazıyı minimumun biraz altına küçült, gerekirse kelime böl
+      for (const b of segTodo) if (!b.layout.fits) b.layout = MTC.forceFit(fctx, caseFix(b.result.tr), b, k, b.minF);
       todo.push(...segTodo);
-      // Sonraki sayfalar için tutarlılık bağlamı (isimler, hitap, üslup)
-      for (const b of segTodo) recentLines.push({ en: b.result.en, tr: b.result.tr });
-      if (recentLines.length > 60) recentLines.splice(0, recentLines.length - 60);
     }
     bitmap.close?.();
     ent.fromCache = anyCache;
@@ -431,7 +367,7 @@
   async function translateInPage(results, onNeedClick) {
     if (!('Translator' in self)) {
       const e = new Error('Ücretsiz çeviri motoru bu tarayıcıda yok. Güncel Google Chrome kullanın ' +
-        '(Edge/Opera/Brave\'de bulunmayabilir) ya da ayarlardan "Claude API" motorunu seçin.');
+        '(Edge/Opera/Brave\'de bulunmayabilir) (Chrome menüsü → Yardım → Google Chrome hakkında ile güncelleyin).');
       e.code = 'NO_TRANSLATOR';
       throw e;
     }
@@ -440,7 +376,7 @@
         const opts = { sourceLanguage: 'en', targetLanguage: 'tr' };
         const av = await Translator.availability(opts);
         if (av === 'unavailable') {
-          const e = new Error('Chrome bu bilgisayarda İngilizce→Türkçe çeviri paketini desteklemiyor. Ayarlardan "Claude API" motorunu seçebilirsiniz.');
+          const e = new Error('Chrome bu bilgisayarda İngilizce→Türkçe çeviri paketini desteklemiyor.');
           e.code = 'NO_TRANSLATOR';
           throw e;
         }
@@ -621,7 +557,7 @@
           ent.error = err.message || String(err);
           lastError = ent.error;
           // Anahtar/bakiye hatasında kuyruğun kalanını boşuna deneme
-          if (['NO_KEY', 'BAD_KEY', 'NO_CREDIT', 'FORBIDDEN', 'NO_TRANSLATOR'].includes(err.code)) {
+          if (['NO_TRANSLATOR'].includes(err.code)) {
             for (const q of queue.splice(0)) { q.status = 'error'; q.error = ent.error; }
           }
         })
