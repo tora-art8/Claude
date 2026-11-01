@@ -137,7 +137,7 @@ async function mockApi(route) {
   console.log('Eklenti yüklendi:', extId);
 
   // Ayarları kaydet (sahte anahtar)
-  await sw.evaluate(() => chrome.storage.local.set({ settings: { apiKey: 'sk-ant-test', model: 'claude-opus-5-5', minFontPx: 15, uppercase: false, effort: 'medium' } }));
+  await sw.evaluate(() => chrome.storage.local.set({ settings: { engine: 'claude', apiKey: 'sk-ant-test', model: 'claude-opus-5-5', minFontPx: 15, uppercase: false, effort: 'medium' } }));
 
   const page = await ctx.newPage();
   page.on('console', (m) => { if (/MangaÇeviri|error/i.test(m.text())) console.log('[sayfa]', m.text()); });
@@ -244,7 +244,7 @@ async function mockApi(route) {
   console.log('Webtoon dilimleme ve bağlam aktarımı çalışıyor.');
 
   // Hata yolu: API anahtarı yokken anlaşılır Türkçe hata gösterilmeli
-  await sw.evaluate(() => chrome.storage.local.set({ settings: { apiKey: '' } }));
+  await sw.evaluate(() => chrome.storage.local.set({ settings: { engine: 'claude', apiKey: '' } }));
   const callsBeforeErr = apiCalls.length;
   await page.goto('http://localhost:8701/hata');
   await page.waitForFunction(() => document.images[0].complete && document.images[0].naturalWidth > 0);

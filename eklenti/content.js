@@ -16,7 +16,7 @@
   globalThis.__mtc = { alive: () => { try { return !!chrome.runtime?.id; } catch (_) { return false; } } };
 
   const MTC = globalThis.MTC;
-  const DEFAULTS = { minFontPx: 13, uppercase: false };
+  const DEFAULTS = { minFontPx: 13, uppercase: false, engine: 'ucretsiz' };
   const MAX_PARALLEL = 2;
 
   const entries = new Map(); // id -> kayıt
@@ -248,9 +248,14 @@
         b.maxChars = MTC.estimateCapacity(fctx, b, k, comfy);
       }
 
-      // Yapay zekâya gidecek görseller: balon kırpıntıları + dilimin/sayfanın tamamı (bağlam için)
+      const free = settings.engine !== 'claude';
+      // Ücretsiz motor: sadece yazının temizlenmiş kırpıntısı OCR'a gider
+      const ocr = {};
+      if (free) for (const b of bubbles) ocr[b.id] = makeOcrCrop(full, b, k, seg.y0);
+      // Claude motoru: balon kırpıntıları + dilimin/sayfanın tamamı (bağlam için)
       const crops = {};
-      for (const b of bubbles) {
+      let page = null;
+      if (!free) for (const b of bubbles) {
         const m = Math.max(b.w, b.h) * 0.12;
         const x0 = Math.max(0, Math.floor((b.x - m) * k)), y0 = Math.max(0, Math.floor(seg.y0 + (b.y - m) * k));
         const x1 = Math.min(W, Math.ceil((b.x + b.w + m) * k)), y1 = Math.min(H, Math.ceil(seg.y0 + (b.y + b.h + m) * k));
@@ -260,21 +265,36 @@
         c.getContext('2d').drawImage(full, x0, y0, cw, ch, 0, 0, c.width, c.height);
         crops[b.id] = canvasToB64(c, 0.9);
       }
-      const s = Math.min(1, 1400 / Math.max(W, segH));
-      const pc = makeCanvas(Math.max(1, Math.round(W * s)), Math.max(1, Math.round(segH * s)));
-      pc.getContext('2d').drawImage(full, 0, seg.y0, W, segH, 0, 0, pc.width, pc.height);
-      const page = canvasToB64(pc, 0.8);
+      if (!free) {
+        const s = Math.min(1, 1400 / Math.max(W, segH));
+        const pc = makeCanvas(Math.max(1, Math.round(W * s)), Math.max(1, Math.round(segH * s)));
+        pc.getContext('2d').drawImage(full, 0, seg.y0, W, segH, 0, 0, pc.width, pc.height);
+        page = canvasToB64(pc, 0.8);
+      }
 
-      ent.step = `${bubbles.length} balon çevriliyor` + part;
+      ent.step = (free ? `${bubbles.length} balon okunuyor` : `${bubbles.length} balon çevriliyor`) + part;
       updatePanel();
-      const { results, fromCache } = await bg('translate', {
+      const boxes = bubbles.map((b) => [b.x, b.y, b.w, b.h]);
+      const resp = await bg('translate', {
         hash,
         page,
         crops,
-        context: recentLines.slice(-CONTEXT_LINES),
-        bubbles: bubbles.map((b) => ({ id: b.id, maxChars: b.maxChars, box: [b.x, b.y, b.w, b.h] })),
+        ocr,
+        context: free ? [] : recentLines.slice(-CONTEXT_LINES),
+        bubbles: bubbles.map((b, i) => ({ id: b.id, maxChars: b.maxChars, box: boxes[i] })),
       });
+      const { results, fromCache } = resp;
       if (!fromCache) anyCache = false;
+      if (resp.needTranslate) {
+        // Eklentinin gizli sayfasında çevirmen yoksa/indirilmemişse çeviriyi bu sayfada yap
+        ent.step = 'Çevriliyor' + part;
+        updatePanel();
+        await translateInPage(results, () => {
+          ent.step = 'İlk kullanım: paneldeki "Türkçe çeviri paketini hazırla" düğmesine basın';
+          updatePanel();
+        });
+        bg('saveCache', { hash, boxes, results }).catch(() => {});
+      }
 
       // 1. tur: yazı boyutunu küçülterek sığdırmayı dene
       const byId = new Map(results.map((r) => [r.id, r]));
@@ -289,7 +309,10 @@
 
       // 2. tur: hâlâ sığmayanları yapay zekâya daha sıkı sınırla kısalttır
       const overflow = segTodo.filter((b) => !b.layout.fits);
-      if (overflow.length) {
+      if (overflow.length && free) {
+        // Ücretsiz motorda kısaltma yapacak yapay zekâ yok: yazıyı küçült, gerekirse kelime böl
+        for (const b of overflow) b.layout = MTC.forceFit(fctx, caseFix(b.result.tr), b, k, b.minF);
+      } else if (overflow.length) {
         ent.step = `${overflow.length} çeviri kısaltılıyor` + part;
         updatePanel();
         try {
@@ -342,6 +365,121 @@
     showTranslated(ent);
     ent.status = 'done';
     ent.step = '';
+  }
+
+
+  // -------------------------------------------------------------------
+  // Ücretsiz motor yardımcıları
+  // -------------------------------------------------------------------
+
+  /**
+   * OCR için yazı bölgesini hazırlar: balonun çizgisi/kuyruğu beyaza boyanır,
+   * harfler OCR'ın sevdiği boyuta (≈34 px) büyütülür, gri tonlamaya çevrilir.
+   */
+  function makeOcrCrop(full, b, k, offY) {
+    const pad = Math.max(3, (b.medianLetterH || 10) * 0.6);
+    const tx0 = Math.max(b.x, b.text.x - pad), ty0 = Math.max(b.y, b.text.y - pad);
+    const tx1 = Math.min(b.x + b.w, b.text.x + b.text.w + pad), ty1 = Math.min(b.y + b.h, b.text.y + b.text.h + pad);
+    const X0 = tx0 * k, Y0 = offY + ty0 * k, CW = (tx1 - tx0) * k, CH = (ty1 - ty0) * k;
+    const letterFull = Math.max(4, (b.medianLetterH || 12) * k);
+    let s = Math.min(4, Math.max(0.5, 34 / letterFull));
+    s = Math.min(s, 2400 / Math.max(CW, CH));
+    const w = Math.max(8, Math.round(CW * s)), h = Math.max(8, Math.round(CH * s));
+    const c = makeCanvas(w + 20, h + 20); // kenarda beyaz boşluk OCR'a yardımcı olur
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(full, X0, Y0, CW, CH, 10, 10, w, h);
+    const id = ctx.getImageData(10, 10, w, h);
+    const d = id.data;
+    for (let y = 0; y < h; y++) {
+      const ly = Math.floor((Y0 + (y + 0.5) / s - offY) / k) - b.oy;
+      for (let x = 0; x < w; x++) {
+        const lx = Math.floor((X0 + (x + 0.5) / s) / k) - b.ox;
+        const p = (y * w + x) * 4;
+        const inside = lx >= 0 && ly >= 0 && lx < b.bw && ly < b.bh && b.mask[ly * b.bw + lx];
+        let g = inside ? (d[p] * 77 + d[p + 1] * 150 + d[p + 2] * 29) >> 8 : 255;
+        if (g > 175) g = 255; // açık gri kenar izlerini temizle (OCR paraziti azalır)
+        d[p] = d[p + 1] = d[p + 2] = g;
+      }
+    }
+    ctx.putImageData(id, 10, 10);
+    return c.toDataURL('image/png');
+  }
+
+  /** Manga yazıları çoğunlukla BÜYÜK HARF; çevirmen normal cümle düzeninde daha iyi çalışır. */
+  function sentenceCase(t) {
+    const letters = t.match(/[A-Za-z]/g) || [];
+    const upper = letters.filter((c) => c === c.toUpperCase()).length;
+    if (letters.length < 3 || upper / letters.length < 0.8) return t;
+    let r = t.toLowerCase();
+    r = r.replace(/(^|[.!?…]\s+|["“(]\s*)([a-z])/g, (m, a, c) => a + c.toUpperCase());
+    return r.replace(/\bi\b/g, 'I').replace(/\bi'(m|ll|ve|d)\b/g, "I'$1");
+  }
+
+  let pageTranslatorPromise = null;
+  /**
+   * Chrome'un yerleşik çevirmeniyle manga sayfasının içinde çeviri.
+   * Türkçe paket bu site için ilk kez kullanılıyorsa tarayıcı bir tıklama ister:
+   * panelde "Türkçe çeviri paketini hazırla" düğmesi çıkar.
+   */
+  async function translateInPage(results, onNeedClick) {
+    if (!('Translator' in self)) {
+      const e = new Error('Ücretsiz çeviri motoru bu tarayıcıda yok. Güncel Google Chrome kullanın ' +
+        '(Edge/Opera/Brave\'de bulunmayabilir) ya da ayarlardan "Claude API" motorunu seçin.');
+      e.code = 'NO_TRANSLATOR';
+      throw e;
+    }
+    if (!pageTranslatorPromise) {
+      pageTranslatorPromise = (async () => {
+        const opts = { sourceLanguage: 'en', targetLanguage: 'tr' };
+        const av = await Translator.availability(opts);
+        if (av === 'unavailable') {
+          const e = new Error('Chrome bu bilgisayarda İngilizce→Türkçe çeviri paketini desteklemiyor. Ayarlardan "Claude API" motorunu seçebilirsiniz.');
+          e.code = 'NO_TRANSLATOR';
+          throw e;
+        }
+        if (av === 'available') return Translator.create(opts);
+        return waitForDownloadClick(opts); // indirme bir kullanıcı tıklaması gerektirir
+      })();
+      pageTranslatorPromise.catch(() => { pageTranslatorPromise = null; });
+    }
+    if (onNeedClick && !(await Promise.race([pageTranslatorPromise.then(() => true, () => true), new Promise((r) => setTimeout(() => r(false), 300))]))) {
+      onNeedClick();
+    }
+    const translator = await pageTranslatorPromise;
+    for (const r of results) {
+      if (r.speech && r.en && !r.tr) r.tr = (await translator.translate(sentenceCase(r.en))).trim();
+    }
+  }
+
+  function waitForDownloadClick(opts) {
+    showPanel();
+    return new Promise((resolve, reject) => {
+      const btn = panel.root.getElementById('dl');
+      btn.style.display = '';
+      btn.disabled = false;
+      btn.textContent = 'Türkçe çeviri paketini hazırla (bir kez)';
+      btn.onclick = async () => {
+        btn.disabled = true;
+        btn.textContent = 'İndiriliyor…';
+        try {
+          const t = await Translator.create({
+            ...opts,
+            monitor(m) {
+              m.addEventListener('downloadprogress', (e) => {
+                btn.textContent = `İndiriliyor… %${Math.round((e.loaded || 0) * 100)}`;
+              });
+            },
+          });
+          btn.style.display = 'none';
+          resolve(t);
+        } catch (e) {
+          btn.style.display = 'none';
+          reject(new Error('Türkçe çeviri paketi indirilemedi: ' + (e.message || e)));
+        }
+      };
+    });
   }
 
   // -------------------------------------------------------------------
@@ -478,7 +616,7 @@
           ent.error = err.message || String(err);
           lastError = ent.error;
           // Anahtar/bakiye hatasında kuyruğun kalanını boşuna deneme
-          if (['NO_KEY', 'BAD_KEY', 'NO_CREDIT', 'FORBIDDEN'].includes(err.code)) {
+          if (['NO_KEY', 'BAD_KEY', 'NO_CREDIT', 'FORBIDDEN', 'NO_TRANSLATOR'].includes(err.code)) {
             for (const q of queue.splice(0)) { q.status = 'error'; q.error = ent.error; }
           }
         })
@@ -530,6 +668,7 @@
         button.p{background:#e94e77}
         button:hover{filter:brightness(1.15)}
         .x{background:transparent;padding:2px 6px;color:#aaa}
+        .dl{width:100%;margin-top:8px}
       </style>
       <div class="box">
         <div class="row"><span class="title">Manga Çeviri TR</span>
@@ -537,6 +676,7 @@
           <button class="x" id="cl" title="Paneli gizle">✕</button></div>
         <div class="bar"><i id="br"></i></div>
         <div class="st" id="st"></div>
+        <button class="p dl" id="dl" style="display:none"></button>
         <div class="err" id="er"></div>
       </div>`;
     root.getElementById('tg').onclick = () => toggleAll();

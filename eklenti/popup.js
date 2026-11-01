@@ -2,6 +2,7 @@
 const $ = (id) => document.getElementById(id);
 let tabId = null;
 let timer = null;
+let engine = 'ucretsiz';
 
 const DURUM = {
   idle: 'bekliyor',
@@ -75,7 +76,10 @@ async function refresh() {
 
 async function init() {
   const { settings } = await chrome.storage.local.get('settings');
-  $('uyari').hidden = !!settings?.apiKey;
+  engine = settings?.engine || 'ucretsiz';
+  $('uyari').hidden = engine !== 'claude' || !!settings?.apiKey;
+  // Ücretsiz motoru önceden ısıt (OCR modeli yüklensin, ilk sayfa hızlı gelsin)
+  chrome.runtime.sendMessage({ type: 'warmup' }).catch(() => {});
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   tabId = tab?.id;
@@ -92,9 +96,36 @@ async function init() {
 }
 
 $('cevir').onclick = async () => {
+  if (engine !== 'claude') await prepareTranslator();
   await send({ type: 'translatePage' });
   refresh();
 };
+
+// Chrome'un yerleşik Türkçe çeviri paketi ilk seferde bir tıklamayla iner.
+// Bu düğmeye basmak o tıklamayı sağlar; sonra arka plandaki motor paketi kullanabilir.
+async function prepareTranslator() {
+  if (!('Translator' in self)) return;
+  const opts = { sourceLanguage: 'en', targetLanguage: 'tr' };
+  try {
+    const av = await Translator.availability(opts);
+    if (av === 'available' || av === 'unavailable') return;
+    $('cevir').disabled = true;
+    $('cevir').textContent = 'Türkçe paket indiriliyor (sadece ilk sefer)…';
+    await Translator.create({
+      ...opts,
+      monitor(m) {
+        m.addEventListener('downloadprogress', (e) => {
+          $('cevir').textContent = `Türkçe paket indiriliyor… %${Math.round((e.loaded || 0) * 100)}`;
+        });
+      },
+    });
+  } catch (e) {
+    console.warn('Çeviri paketi hazırlanamadı', e);
+  } finally {
+    $('cevir').disabled = false;
+    $('cevir').textContent = 'Bu sayfayı çevir';
+  }
+}
 $('gecis').onclick = async () => {
   await send({ type: 'toggleAll' });
   refresh();

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Manga Çeviri TR",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "İngilizce manga sayfalarındaki konuşma balonlarını bulur, doğal Türkçeye çevirir ve balona sığdırarak üstüne yazar.",
   "icons": {
     "16": "icons/icon16.png",
@@ -17,6 +17,9 @@
     }
   },
   "options_page": "options.html",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
   "background": {
     "service_worker": "background.js"
   },
@@ -26,6 +29,7 @@
     "scripting",
     "activeTab",
     "contextMenus",
+    "offscreen",
     "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [

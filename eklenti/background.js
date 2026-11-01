@@ -13,7 +13,10 @@ const API_VERSION = '2026-10-21';
 const PROMPT_VERSION = 'v1'; // istem değişirse eski önbellek kullanılmasın diye
 const CACHE_LIMIT = 800;     // en fazla kaç sayfanın çevirisi saklansın
 
+const FREE_VERSION = 'v1';   // ücretsiz motor (OCR + Chrome çevirmeni) önbellek sürümü
+
 const DEFAULT_SETTINGS = {
+  engine: 'ucretsiz', // 'ucretsiz' (bilgisayarda, API'siz) veya 'claude' (API, en yüksek kalite)
   apiKey: '',
   model: 'claude-opus-5-5',
   minFontPx: 13,      // ekranda okunabilir en küçük yazı boyutu (CSS piksel)
@@ -35,6 +38,8 @@ const handlers = {
   shorten: (m) => shortenTexts(m),
   ensureInjected: (m) => ensureInjected(m.tabId),
   testKey: (m) => testKey(m.apiKey),
+  saveCache: (m) => saveFreeCache(m),
+  warmup: () => warmup(),
   cacheStats: () => cacheStats(),
   clearCache: () => clearCache(),
 };
@@ -298,6 +303,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  */
 async function translateBubbles(m) {
   const settings = await getSettings();
+  if (settings.engine !== 'claude') return translateFree(m);
   const cacheKey = `c:${m.hash}:${settings.model}:${PROMPT_VERSION}`;
   const cached = (await chrome.storage.local.get(cacheKey))[cacheKey];
   if (cached && sameBubbles(cached.boxes, m.bubbles)) {
@@ -414,5 +420,66 @@ async function cacheStats() {
 async function clearCache() {
   const index = await getIndex();
   await chrome.storage.local.remove([...Object.keys(index), 'cacheIndex']);
+  return true;
+}
+
+// ---------------------------------------------------------------------
+// Ücretsiz motor: OCR + Chrome'un yerleşik çevirmeni (offscreen.html'de çalışır)
+// ---------------------------------------------------------------------
+let offscreenCreating = null;
+async function ensureOffscreen() {
+  const existing = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+  if (existing.length) return;
+  if (!offscreenCreating) {
+    // Otomatik testlerde sahte çevirmenle açılır (gerçek kullanımda bu anahtar hiç yoktur)
+    const { testMockTranslator } = await chrome.storage.local.get('testMockTranslator');
+    offscreenCreating = chrome.offscreen.createDocument({
+      url: 'offscreen.html' + (testMockTranslator ? '?mock=1' : ''),
+      reasons: ['WORKERS'],
+      justification: 'Manga balonlarındaki yazıyı okumak (OCR) ve bilgisayarda çevirmek için',
+    }).finally(() => { offscreenCreating = null; });
+  }
+  await offscreenCreating;
+}
+
+async function warmup() {
+  const settings = await getSettings();
+  if (settings.engine === 'claude') return false;
+  await ensureOffscreen();
+  chrome.runtime.sendMessage({ target: 'offscreen', type: 'warmup' }).catch(() => {});
+  return true;
+}
+
+const freeKey = (hash) => `c:${hash}:ucretsiz:${FREE_VERSION}`;
+
+/**
+ * m.ocr = {id: dataURL}  (yazının temizlenmiş, büyütülmüş kırpıntısı)
+ * Dönüş: {results, fromCache, needTranslate?, translatorState?}
+ *  needTranslate=true → eklentinin kendi sayfasında çevirmen kullanılamadı; içerik betiği
+ *  çeviriyi manga sayfasının içinde yapmayı deneyecek.
+ */
+async function translateFree(m) {
+  const key = freeKey(m.hash);
+  const cached = (await chrome.storage.local.get(key))[key];
+  if (cached && sameBubbles(cached.boxes, m.bubbles)) {
+    touchCache(key);
+    return { results: cached.results, fromCache: true };
+  }
+  await ensureOffscreen();
+  const r = await chrome.runtime.sendMessage({
+    target: 'offscreen',
+    type: 'ocrTranslate',
+    items: m.bubbles.map((b) => ({ id: b.id, img: m.ocr[b.id] })),
+  });
+  if (!r?.ok) throw apiError('Yazı okuma (OCR) başarısız: ' + (r?.error || 'bilinmeyen hata'), 'OCR');
+  if (r.translator !== 'ok') {
+    return { results: r.results, fromCache: false, needTranslate: true, translatorState: r.translator };
+  }
+  await saveCache(key, { boxes: m.bubbles.map((b) => b.box), results: r.results, t: Date.now() });
+  return { results: r.results, fromCache: false };
+}
+
+async function saveFreeCache(m) {
+  await saveCache(freeKey(m.hash), { boxes: m.boxes, results: m.results, t: Date.now() });
   return true;
 }

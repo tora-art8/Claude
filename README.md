@@ -1,8 +1,17 @@
 # Manga Çeviri TR — Tarayıcı Eklentisi
 
-İngilizce manga sayfalarındaki **konuşma balonlarını bulur**, **anlamı koruyarak doğal Türkçeye çevirir**
+İngilizce manga sayfalarındaki **konuşma balonlarını bulur**, **Türkçeye çevirir**
 ve çeviriyi **balona sığacak şekilde** orijinal yazının üstüne yerleştirir.
-Chrome, Edge, Brave, Opera gibi tüm Chromium tabanlı tarayıcılarda çalışır (Manifest V3).
+
+**İki çeviri motoru var:**
+
+| | **Ücretsiz (varsayılan)** | **Claude API (isteğe bağlı)** |
+|---|---|---|
+| Ücret / hesap | Yok — API anahtarı gerekmez | Ücretli API anahtarı |
+| Nerede çalışır | Tamamen bilgisayarda (yazı okuma: Tesseract, çeviri: Chrome'un yerleşik çevirmeni) | Anthropic sunucusu |
+| Hız | Sayfa başı ≈ 1 saniye | Sayfa başı ≈ 15-40 saniye (tahmin) |
+| Çeviri kalitesi | Makine çevirisi: anlaşılır ama daha düz | En doğal: ton, sen/siz hitabı, ünlemler korunur, sığmayanı anlamı bozmadan kısaltır |
+| Tarayıcı | **Google Chrome** (güncel, bilgisayar) | Chrome, Edge, Brave, Opera |
 
 | Önce | Sonra |
 |---|---|
@@ -19,6 +28,9 @@ gri kutu, panel sınırını aşan balon):
 
 ## 1. Kurulum (5 dakika)
 
+> **Ücretsiz motor için Google Chrome kullanın.** Chrome'un yerleşik çevirmeni Edge, Opera ve Brave'de
+> bulunmayabilir. Chrome'u güncellemek için: Chrome menüsü → Yardım → Google Chrome hakkında.
+
 1. Bu depoyu bilgisayarına indir: GitHub'da **Code → Download ZIP**, sonra ZIP'i bir klasöre çıkar.
 2. Tarayıcıda eklentiler sayfasını aç:
    - Chrome / Brave: adres çubuğuna `chrome://extensions`
@@ -29,9 +41,17 @@ gri kutu, panel sınırını aşan balon):
 5. Eklenti listede **Manga Çeviri TR** olarak görünür. Araç çubuğundaki yapboz simgesinden
    eklentiyi **sabitle** ki pembe "TR" simgesi hep görünsün.
 
-### API anahtarı
+### İlk ayar (bir kez)
 
-Çeviri için Anthropic'in Claude yapay zekâsı kullanılır, bu yüzden bir API anahtarı gerekir:
+1. Eklenti simgesine tıkla → sağ üstteki **⚙** → **Ücretsiz** seçili olsun.
+2. **Türkçe paketi hazırla ve dene** düğmesine bas. Chrome Türkçe çeviri paketini bir kez indirir ve örnek bir
+   cümle çevirir ("✓ Hazır" yazısını gör). Sonra **Kaydet**.
+3. Manga sitesinde ilk kez çevirirken panelde **"Türkçe çeviri paketini hazırla"** düğmesi çıkarsa bir kez
+   ona bas (Chrome her site için ilk seferde bir tıklama ister).
+
+### İsteğe bağlı: Claude API (en doğal çeviri, ücretli)
+
+Daha doğal çeviri istersen ayarlardan **Claude API** motorunu seç ve bir API anahtarı gir:
 
 1. [platform.claude.com](https://platform.claude.com/) adresinde hesap aç.
 2. **Billing** bölümünden küçük bir bakiye yükle (5 $ yüzlerce sayfaya yeter, aşağıdaki maliyet tablosuna bak).
@@ -51,7 +71,7 @@ asla gönderilmez, sadece `api.anthropic.com`'a gider.
 - **Uzun bölümler / webtoon:** popup'taki **Yeni yüklenen sayfaları otomatik çevir** kutusunu işaretle;
   aşağı kaydırdıkça yüklenen sayfalar da çevrilir.
 - Tek bir görseli çevirmek: görselde sağ tık → **Bu görseli Türkçeye çevir**.
-- Aynı sayfayı tekrar açarsan çeviri **önbellekten** gelir, API'ye tekrar para ödenmez.
+- Aynı sayfayı tekrar açarsan çeviri **önbellekten** anında gelir (Claude motorunda tekrar ücret ödenmez).
 
 ## 3. Nasıl çalışıyor? (aşama aşama)
 
@@ -60,8 +80,10 @@ Proje istenen 5 aşamaya göre düzenlendi. Her aşamanın kodu ayrı dosyada ve
 ```
 eklenti/
 ├── manifest.json        Eklentinin kimlik kartı: izinler, simgeler, kısayol
-├── background.js        Arka plan: görsel indirme (CORS), Claude API, önbellek, sağ tık menüsü
+├── background.js        Arka plan: görsel indirme (CORS), motor seçimi, Claude API, önbellek, sağ tık menüsü
 ├── content.js           Sayfada çalışan kısım: görselleri bulma, işleme, değiştirme, panel
+├── offscreen.html/js    Ücretsiz motor: gizli sayfada OCR (Tesseract) + Chrome çevirmeni
+├── vendor/tesseract/    Gömülü OCR motoru ve İngilizce verisi (Apache 2.0, internet gerekmez)
 ├── lib/detector.js      Balon tespiti (tarayıcıda, kütüphanesiz görüntü işleme)
 ├── lib/layout.js        Türkçeyi balona sığdırma, İngilizceyi kapatma, yazma
 ├── popup.html/js        Simgeye tıklayınca açılan pencere
@@ -72,7 +94,8 @@ eklenti/
 test/
 ├── ornek-sayfa-uret.py  Özgün test manga sayfaları üretir
 ├── tespit-testi.js      Balon tespitini görselleştirir
-└── uctan-uca-test.js    Eklentiyi gerçek Chromium'da baştan sona test eder
+├── ucretsiz-motor-test.js  Ücretsiz motoru (gerçek OCR) Chromium'da test eder
+└── uctan-uca-test.js    Claude motoruyla baştan sona test (API taklit edilir)
 ```
 
 ### Aşama 1 — Klasör yapısı ve sayfadaki manga görsellerini listeleme
@@ -94,13 +117,21 @@ Bilgisayarlı görü kısmı tamamen tarayıcıda, ek kütüphane olmadan yapıl
    taranır ve ayrı istekle çevrilir. Dilim sınırına denk gelen balon komşu dilimde bütün olarak işlenir,
    hiçbir balon iki kez yazılmaz.
 
-Yazı okuma (OCR) işini Claude yapar: her balonun kırpıntısını görür. Bu, Tesseract gibi tarayıcı OCR'larına göre
-manga fontlarında çok daha isabetlidir ve **efekt seslerini/yanlış adayları** ayıklar: Claude "bu konuşma değil"
-derse o alana hiç dokunulmaz.
+**Yazı okuma (OCR):**
+- *Ücretsiz motor:* Balonun yalnızca yazı bölgesi kırpılır, balon çizgisi beyaza boyanır, harfler büyütülür ve
+  eklentiye gömülü **Tesseract** ile okunur. Okunan metin gerçek kelimelere benzemiyorsa (yüz, çizim parçası)
+  o aday **atlanır**, üstüne yazı yazılmaz. Tek başına "I" harfinin "1"/"|" okunması gibi bilinen hatalar düzeltilir.
+- *Claude motoru:* Claude her balonun kırpıntısını görüp kendisi okur ve "konuşma değil" dediği alanlara dokunulmaz.
 
 **Test (geliştirici):** `node test/tespit-testi.js test/ornek/sayfa1.png` → bulunan balonları kırmızı kutuyla çizer.
 
-### Aşama 3 — Çeviri (`background.js → translateBubbles()`)
+### Aşama 3 — Çeviri
+**Ücretsiz motor (`offscreen.js`):** Chrome'un yerleşik çevirmeni (Translator API) bilgisayarda çevirir.
+Manga yazıları BÜYÜK HARF olduğu için çeviriden önce normal cümle düzenine çevrilir ("I'M SORRY" → "I'm sorry").
+Motor gizli bir sayfada açık tutulur, böylece her sayfada yeniden yüklenmez. Bu sayfada çevirmen kullanılamazsa
+çeviri manga sitesinin içinde yapılır.
+
+**Claude motoru (`background.js → translateBubbles()`):**
 - Sayfanın tamamı (bağlam: kim kime konuşuyor) + numaralı balon kırpıntıları tek istekte gönderilir.
 - Her balon için **"en fazla N karakter"** sınırı modele söylenir. N, balonun gerçek şekline ve okunabilir
   en küçük yazı boyutuna göre hesaplanır (`layout.js → estimateCapacity()`).
@@ -114,11 +145,12 @@ derse o alana hiç dokunulmaz.
 1. İngilizce yazı, balonun kendi arka plan rengiyle balonun şekli boyunca kapatılır (kenar çizgisi korunur).
 2. Türkçe metin büyük yazı boyutundan başlanarak 1, 2, 3… satır denenir; oval balonlarda her satır o
    yükseklikteki balon genişliğine göre kırılır, ortalanır.
-3. **Sığmazsa:** önce yazı küçültülür (ayarlardaki en küçük boyuta kadar). Hâlâ sığmıyorsa o balonlar
-   daha sıkı karakter sınırıyla **modele kısalttırılır** (ucuz, sadece metin isteği). Son çare olarak kelime bölünür.
+3. **Sığmazsa:** önce yazı küçültülür (ayarlardaki en küçük boyuta kadar). Claude motorunda hâlâ sığmıyorsa o balonlar
+   daha sıkı karakter sınırıyla **modele kısalttırılır** (ucuz, sadece metin isteği). Ücretsiz motorda ve son çare
+   olarak yazı biraz daha küçültülür, gerekirse kelime bölünür.
 
 ### Aşama 5 — Ayarlar, önbellek, hata yönetimi
-- **Ayarlar:** API anahtarı (+ test düğmesi), model, çeviri titizliği, en küçük yazı boyutu, BÜYÜK HARF seçeneği.
+- **Ayarlar:** çeviri motoru, ücretsiz motoru hazırla/dene düğmesi, API anahtarı (+ test düğmesi), model, çeviri titizliği, en küçük yazı boyutu, BÜYÜK HARF seçeneği.
 - **Önbellek:** Görüntünün parmak izi + model ile saklanır (en fazla 800 sayfa, en eskiler silinir). Ayarlardan temizlenebilir.
 - **Hata yönetimi:** geçersiz anahtar, yetersiz bakiye, hız sınırı (otomatik bekleyip tekrar dener),
   ağ hatası, sunucu hatası ayrı ayrı Türkçe mesajla gösterilir. Anahtar/bakiye hatasında kalan sayfalar boşuna denenmez.
@@ -142,9 +174,14 @@ doğrudan çizilerek okunur (yedek yol).
 
 Çevrilmiş görsel `blob:` adresiyle `<img>`'ye konur; site buna izin vermezse `data:` adresi denenir.
 
-## 5. Maliyet (yaklaşık)
+## 5. Maliyet ve hız
 
-Bir manga sayfası ≈ 4-6 bin girdi token (görseller) + 1-2 bin çıktı token.
+**Ücretsiz motor:** hiçbir ücret yok. Testte ölçülen hızlar (bu bilgisayarda, çeviri adımı hariç):
+yazı okuma motorunun ilk yüklenmesi dahil 3 sayfa ≈ 2 saniye, motor hazırken sayfa başı ≈ 0,7 saniye.
+Chrome'un çevirmeni de bilgisayarda çalıştığı için çok hızlıdır. 20 sayfalık bir bölüm yaklaşık yarım dakikada
+çevrilir; sayfalar sırayla hazırlandığı için okumaya hemen başlanabilir.
+
+**Claude motoru (isteğe bağlı):** Bir manga sayfası ≈ 4-6 bin girdi token (görseller) + 1-2 bin çıktı token.
 
 | Model | Sayfa başı | 100 sayfalık cilt |
 |---|---|---|
@@ -159,7 +196,9 @@ deneyip kaliteyi karşılaştırabilirsin.
 
 | Mesaj / durum | Ne yapmalı |
 |---|---|
-| "API anahtarı girilmemiş / geçersiz" | Ayarlar → anahtarı yapıştır → **Anahtarı test et** → **Kaydet** |
+| "Ücretsiz çeviri motoru bu tarayıcıda yok" | Güncel **Google Chrome** kullan (Edge/Opera/Brave'de bu motor bulunmayabilir) ya da ayarlardan Claude motorunu seç |
+| Panelde "Türkçe çeviri paketini hazırla" düğmesi | Bir kez bas; Chrome Türkçe paketini indirir ve çeviri devam eder |
+| "API anahtarı girilmemiş / geçersiz" (Claude motoru) | Ayarlar → anahtarı yapıştır → **Anahtarı test et** → **Kaydet** |
 | "API bakiyeniz yetersiz" | platform.claude.com → Billing → bakiye yükle |
 | "Görsel indirilemedi (HTTP 403)" | Site görsele erişimi engelliyor. Sayfayı yenileyip tekrar dene; olmazsa siteyi bana bildir |
 | "Bu sayfada manga görseli bulunamadı" | Görseller henüz yüklenmemiş olabilir: aşağı kaydır, tekrar bas. Bazı siteler mangayı `<canvas>` ile çizer, bunlar ilk sürümde desteklenmiyor |
@@ -172,6 +211,8 @@ deneyip kaliteyi karşılaştırabilirsin.
 ## 7. Bilinen sınırlamalar (ilk sürüm)
 
 - Efekt sesleri ve arka plan yazıları bilerek çevrilmez.
+- Ücretsiz motor makine çevirisidir: karakterin tonunu/hitabını ayarlayamaz ve çeviriyi kısaltamaz (sığmazsa yazı küçülür).
+  Çok süslü/el yazısı fontlarda OCR hata yapabilir. Daha doğal sonuç için Claude motoru seçilebilir.
 - Kenar çizgisi açık (balonun dışına taşan) veya içi koyu/desenli balonlar bulunamayabilir.
 - Siyah zemin üstüne beyaz yazılı balonlar ilk sürümde desteklenmez.
 - `<canvas>` ile çizilen veya CSS arka planı olarak gösterilen sayfalar desteklenmez; sadece `<img>`.
@@ -182,8 +223,14 @@ deneyip kaliteyi karşılaştırabilirsin.
 ```bash
 python3 test/ornek-sayfa-uret.py                 # özgün test sayfalarını üret (Pillow gerekir)
 node test/tespit-testi.js test/ornek/sayfa1.png  # balon tespitini görselleştir (Playwright gerekir)
-node test/uctan-uca-test.js                      # eklentiyi Chromium'da baştan sona test et
+node test/ucretsiz-motor-test.js                 # ücretsiz motor: gerçek OCR + çeviri akışı
+node test/uctan-uca-test.js                      # Claude motoru: baştan sona test
 ```
+
+Ücretsiz motor testi gerçek Tesseract OCR'ı çalıştırır ve 3 test sayfasındaki 13 konuşma balonunun hepsinin
+doğru okunduğunu, yüzlerin konuşma sayılmadığını, API'ye hiç istek gitmediğini, Türkçe paket inmemişken panelde
+indirme düğmesinin çıktığını doğrular. Test tarayıcısı Chrome'un Türkçe paketini indiremediği için çeviri adımında
+sahte çevirmen kullanılır (okunan metni «…» içinde döndürür).
 
 Uçtan uca test; farklı alan adından ve Referer korumalı sunucudan görsel yükler (CORS/hotlink senaryosu),
 Claude API'yi sahte yanıtla taklit eder ve şunları doğrular: görsel listeleme, balon tespiti, çeviri isteği
@@ -194,4 +241,5 @@ API anahtarı yokken anlaşılır hata gösterilmesi.
 ## Telif notu
 
 Çeviriyi kendi kişisel okumanız için kullanın; çevrilmiş görselleri paylaşmayın.
+OCR: [tesseract.js](https://github.com/naptha/tesseract.js) ve İngilizce dil verisi — Apache License 2.0 (`eklenti/vendor/tesseract/`).
 Yazı tipi: [Comic Relief](https://github.com/loudifier/Comic-Relief) — SIL Open Font License 1.1 (`eklenti/fonts/OFL.txt`).
