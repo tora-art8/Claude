@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <title>Manga Çeviri TR</title>
+  <link rel="stylesheet" href="ui.css">
+</head>
+<body class="popup">
+  <header>
+    <img src="icons/icon48.png" alt="" width="28" height="28">
+    <h1>Manga Çeviri TR</h1>
+    <a href="#" id="ayarlar" title="Ayarlar">⚙</a>
+  </header>
+
+  <div id="uyari" class="warn" hidden>
+    API anahtarı girilmemiş. <a href="#" id="ayarlar2">Ayarlar</a>'dan anahtarınızı girin.
+  </div>
+  <div id="kisit" class="warn" hidden>Bu sayfada eklenti çalışamaz (tarayıcı iç sayfası veya mağaza sayfası).</div>
+
+  <main id="ana">
+    <button id="cevir" class="primary">Bu sayfayı çevir</button>
+    <div class="row">
+      <button id="gecis" disabled>Orijinali göster</button>
+    </div>
+    <label class="check"><input type="checkbox" id="oto"> Yeni yüklenen sayfaları otomatik çevir</label>
+
+    <h2 id="baslik">Görseller</h2>
+    <ul id="liste"></ul>
+    <p id="bos" class="muted" hidden>Bu sayfada manga görseli bulunamadı.</p>
+  </main>
+
+  <footer class="muted">
+    İpucu: Görsele <b>Alt + tık</b> → orijinal/çeviri. Sağ tık menüsünden tek görsel çevrilebilir.
+    Kısayol: <b>Alt+Shift+T</b>
+  </footer>
+  <script src="popup.js"></script>
+</body>
+</html>

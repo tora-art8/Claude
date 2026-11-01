@@ -1,0 +1,64 @@
+/* Popup ve ayarlar sayfası için ortak stil */
+:root {
+  --bg: #ffffff;
+  --fg: #1d1b22;
+  --muted: #6b6475;
+  --line: #e7e3ee;
+  --accent: #e94e77;
+  --card: #f7f5fa;
+  --ok: #1f8a4c;
+  --err: #c62842;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #1d1b22; --fg: #f3f0f7; --muted: #a59eb1; --line: #34303d; --card: #26232d; --ok: #5fd48f; --err: #ff8a9a; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: var(--accent); }
+header { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+header h1 { font-size: 16px; margin: 0; flex: 1; }
+header a { text-decoration: none; font-size: 18px; }
+h2 { font-size: 14px; margin: 14px 0 6px; }
+button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--fg); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+input[type=password], input[type=text], input[type=number], select {
+  font: inherit; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg);
+}
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.check { display: flex; gap: 8px; align-items: center; margin: 10px 0; cursor: pointer; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.ok { color: var(--ok); }
+.err { color: var(--err); font-size: 12px; }
+.warn { margin: 10px 14px 0; padding: 8px 10px; border-radius: 8px; background: #fff3cd; color: #6b4e00; font-size: 13px; }
+
+/* Popup */
+body.popup { width: 340px; }
+.popup main { padding: 12px 14px 4px; }
+.popup #cevir { width: 100%; padding: 10px; font-size: 15px; margin-bottom: 8px; }
+.popup .row button { flex: 1; }
+.popup ul { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.popup li { display: grid; grid-template-columns: 10px 1fr auto; gap: 8px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.popup li:last-child { border-bottom: 0; }
+.popup li.click { cursor: pointer; }
+.popup li.click:hover { background: var(--card); }
+.popup li .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.popup li .st { color: var(--muted); white-space: nowrap; }
+.popup li .err { grid-column: 2 / 4; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: #aaa; }
+.dot.queued, .dot.working { background: #f0a500; }
+.dot.done { background: var(--ok); }
+.dot.error { background: var(--err); }
+.popup footer { padding: 8px 14px 12px; font-size: 11.5px; }
+
+/* Ayarlar */
+body.options { max-width: 680px; margin: 0 auto; padding: 0 16px 40px; }
+.options header { padding: 20px 0 14px; }
+.options section { padding: 6px 0 12px; border-bottom: 1px solid var(--line); }
+.options #apiKey { flex: 1; min-width: 220px; }
+.options label { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
+.options label.check { flex-direction: row; }
+.options .save { display: flex; gap: 12px; align-items: center; padding: 16px 0; }
+code { background: var(--card); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
