@@ -1,0 +1,63 @@
+# is-takip profil dosyası — kendinize göre düzenleyin.
+# Büyük/küçük harf ve Türkçe karakter farkı önemsizdir ("Bilgi İşlem" = "bilgi islem").
+
+[genel]
+min_puan = 50          # bu puanın altındaki ilanlar bildirilmez (0-100)
+max_bildirim = 15      # tek taramada en fazla kaç ilan gönderilsin
+veri_dosyasi = "gorulen_ilanlar.json"
+
+[profil]
+# Başlıkta geçerse en çok puanı getirir
+pozisyon_kelimeleri = [
+  "teknik destek", "IT destek", "BT destek", "bilgi işlem", "help desk", "helpdesk",
+  "service desk", "teknik servis", "bilgisayar teknisyeni", "donanım teknisyeni",
+  "sistem destek", "masaüstü destek", "saha destek", "IT uzman yardımcısı", "IT uzmanı",
+  "IT support", "technical support", "desktop support", "IT technician", "IT intern", "IT stajyer",
+]
+# Bildiğiniz konular; ilanda her geçen beceri puan ekler
+beceri_kelimeleri = [
+  "donanım", "arıza", "kurulum", "format", "windows", "office", "microsoft 365", "office 365",
+  "outlook", "active directory", "ağ", "network", "yazıcı", "kablolama", "LAN", "ticket",
+]
+# Sizin seviyenize uygun ilan işaretleri
+olumlu_kelimeler = [
+  "junior", "stajyer", "yeni mezun", "deneyimsiz", "tecrübesiz", "lise mezunu",
+  "meslek lisesi", "endüstri meslek", "entry level", "intern", "giriş seviyesi",
+]
+# Üst seviye ilan işaretleri (başlıkta geçerse puan çok düşer)
+olumsuz_kelimeler = [
+  "senior", "kıdemli", "lead", "takım lideri", "müdür", "manager", "yönetici",
+  "direktör", "head of", "şef",
+]
+# Bunlardan biri geçen ilan tamamen elenir
+haric_kelimeler = ["satış temsilcisi", "kurye", "garson"]
+
+max_deneyim_yili = 2
+
+sehir = "İstanbul"
+tercih_edilen_bolgeler = [
+  "Avrupa", "Arnavutköy", "Avcılar", "Bağcılar", "Bahçelievler", "Bakırköy", "Başakşehir",
+  "Bayrampaşa", "Beşiktaş", "Beylikdüzü", "Beyoğlu", "Büyükçekmece", "Çatalca", "Esenler",
+  "Esenyurt", "Eyüpsultan", "Fatih", "Gaziosmanpaşa", "Güngören", "Kağıthane", "Küçükçekmece",
+  "Sarıyer", "Silivri", "Sultangazi", "Şişli", "Zeytinburnu", "Levent", "Maslak", "Mecidiyeköy",
+]
+istenmeyen_bolgeler = [
+  "Anadolu", "Adalar", "Ataşehir", "Beykoz", "Çekmeköy", "Kadıköy", "Kartal", "Maltepe",
+  "Pendik", "Sancaktepe", "Sultanbeyli", "Şile", "Tuzla", "Ümraniye", "Üsküdar",
+]
+
+[kaynaklar.linkedin]
+aramalar = ["IT destek", "teknik destek", "help desk", "bilgi işlem", "teknik servis", "IT support"]
+konum = "Istanbul, Turkey"
+son_saat = 24        # son 24 saatte yayınlananlar
+sayfa = 2            # arama başına ~20 ilan
+aciklama_cek = true  # umut vadeden ilanların açıklamasını da oku
+
+# RSS beslemesi sunan herhangi bir site eklenebilir:
+# [[kaynaklar.rss]]
+# ad = "Örnek Site"
+# url = "https://ornek.com/ilanlar.rss"
+
+[telegram]
+token_env = "TELEGRAM_BOT_TOKEN"
+chat_id_env = "TELEGRAM_CHAT_ID"

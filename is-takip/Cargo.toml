@@ -1,0 +1,15 @@
+[package]
+name = "is-takip"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json", "form", "query"] }
+rss = "2.1.2"
+scraper = "0.29.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros"] }
+toml = "1.2.1"
