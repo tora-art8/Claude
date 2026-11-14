@@ -1,0 +1,42 @@
+# is-takip'i bilgisayarınız kapalıyken de GitHub sunucularında düzenli çalıştırır.
+# Gerekenler: depo ayarlarında Settings → Secrets and variables → Actions altına
+# TELEGRAM_BOT_TOKEN ve TELEGRAM_CHAT_ID eklemek.
+name: is-takip
+
+on:
+  schedule:
+    # UTC saatiyle; Türkiye saatiyle 09:00-21:00 arası her 3 saatte bir
+    - cron: "17 6,9,12,15,18 * * *"
+  workflow_dispatch: {}
+
+concurrency: is-takip
+
+jobs:
+  tara:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: is-takip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: is-takip
+      - name: Görülen ilanları geri yükle
+        uses: actions/cache/restore@v4
+        with:
+          path: is-takip/gorulen_ilanlar.json
+          key: gorulen-${{ github.run_id }}
+          restore-keys: gorulen-
+      - name: Tara ve bildir
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: cargo run --release -- calistir
+      - name: Görülen ilanları kaydet
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: is-takip/gorulen_ilanlar.json
+          key: gorulen-${{ github.run_id }}
